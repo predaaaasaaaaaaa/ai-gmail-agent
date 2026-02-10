@@ -1,23 +1,22 @@
 """
 MCP Server for Email Operations
-
-This server exposes email tools that can be called by MCP clients.
-
-Tools exposed:
-- list_gmail_emails: Fetch Gmail emails
-- list_icloud_emails: Fetch iCloud emails
-- read_gmail_email: Read full Gmail email
-- read_icloud_email: Read full iCloud email
-- send_gmail_email: Send via Gmail
-- send_icloud_email: Send via iCloud
 """
 
 import asyncio
+import sys
+import os
+from pathlib import Path
+
+# Add parent directory to path so we can import email_tools
+sys.path.insert(0, str(Path(__file__).parent))
+
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
-from email_tools import GmailHandler, iCloudHandler
 import json
+
+# Import email handlers
+from email_tools import GmailHandler, iCloudHandler
 
 # Initialize email handlers
 gmail_handler = GmailHandler(credentials_path="credentials.json")

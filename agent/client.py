@@ -24,46 +24,44 @@ class EmailAgent:
     def __init__(self):
         """
         Initialize the email agent.
-
-        Components:
-        - Groq client (for AI reasoning)
-        - MCP session (for tool execution)
-        - Available tools (fetched from MCP server)
         """
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.session = None
         self.available_tools = []
         self.conversation_history = []
+        self.client_context = None
 
     async def connect_to_mcp_server(self):
         """
         Connect to the MCP server.
-
-        How this works:
-        1. Start the MCP server as a subprocess
-        2. Connect to it via stdio (stdin/stdout)
-        3. Fetch the list of available tools
-
-        The server runs in the background, and we communicate
-        with it by sending JSON-RPC messages.
         """
+        # Get absolute path to server script
+        import pathlib
+
+        current_dir = pathlib.Path(__file__).parent.parent  # Go up to project root
+        server_script = current_dir / "mcp_server" / "server.py"
+
+        if not server_script.exists():
+            raise FileNotFoundError(f"MCP server not found at: {server_script}")
+
+        print(f"🔧 Starting MCP server: {server_script}")
+
         # Server parameters
         server_params = StdioServerParameters(
-            command="python", args=["mcp_server/server.py"], env=None
+            command="python", args=[str(server_script)], env=None
         )
 
-        # Connect to server using async context manager
-        # This returns a tuple of (read_stream, write_stream)
+        # Connect to server
         self.client_context = stdio_client(server_params)
-        self.read_stream, self.write_stream = await self.client_context.__aenter__()
+        read_stream, write_stream = await self.client_context.__aenter__()
 
-        # Create session
-        self.session = ClientSession(self.read_stream, self.write_stream)
+        # Create and initialize session
+        self.session = ClientSession(read_stream, write_stream)
 
-        # Initialize the session
-        await self.session.__aenter__()
+        # Initialize must be called before any other operations
+        init_result = await self.session.initialize()
 
-        # Fetch available tools from server
+        # Now fetch available tools
         tools_response = await self.session.list_tools()
         self.available_tools = tools_response.tools
 
@@ -75,12 +73,8 @@ class EmailAgent:
     async def cleanup(self):
         """
         Cleanup when shutting down the agent.
-
-        Properly closes the MCP session and client connection.
         """
-        if self.session:
-            await self.session.__aexit__(None, None, None)
-        if hasattr(self, "client_context"):
+        if self.client_context:
             await self.client_context.__aexit__(None, None, None)
 
     async def process_command(self, user_input: str) -> str:
@@ -93,7 +87,7 @@ class EmailAgent:
         # Create system prompt with available tools
         system_prompt = self._create_system_prompt()
 
-        # Call LLM to decide what to do
+        # Call Groq to decide what to do
         response = self.groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
