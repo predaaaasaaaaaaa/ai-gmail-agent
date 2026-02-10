@@ -246,7 +246,7 @@ class iCloudHandler:
             # Get list of email IDs
             email_ids = messages[0].split()
 
-            # Get the most recent emails (IMAP returns oldest first, so reverse)
+            # Get the most recent emails
             email_ids = email_ids[-max_results:][::-1]
 
             email_list = []
@@ -258,7 +258,7 @@ class iCloudHandler:
                 # Parse the email
                 msg = email.message_from_bytes(msg_data[0][1])
 
-                # Decode subject (might be encoded)
+                # Decode subject
                 subject = self._decode_header(msg.get("Subject", "No Subject"))
                 from_email = msg.get("From", "Unknown")
                 date = msg.get("Date", "Unknown")
@@ -269,7 +269,7 @@ class iCloudHandler:
                         "subject": subject,
                         "from": from_email,
                         "date": date,
-                        "snippet": f"iCloud email from {from_email}",  # IMAP doesn't have snippets
+                        "snippet": f"iCloud email from {from_email}",
                     }
                 )
 
@@ -298,3 +298,63 @@ class iCloudHandler:
                 decoded_header += part
 
         return decoded_header
+
+    def read_email(self, email_id):
+        """
+        Get full email content from iCloud.
+        """
+        try:
+            mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+            mail.login(self.email, self.password)
+            mail.select("INBOX")
+
+            # Fetch the full email
+            status, msg_data = mail.fetch(email_id.encode(), "(RFC822)")
+
+            # Parse email
+            msg = email.message_from_bytes(msg_data[0][1])
+
+            subject = self._decode_header(msg.get("Subject", "No Subject"))
+            from_email = msg.get("From", "Unknown")
+            date = msg.get("Date", "Unknown")
+
+            # Extract body
+            body = self._get_email_body(msg)
+
+            mail.close()
+            mail.logout()
+
+            return {
+                "id": email_id,
+                "subject": subject,
+                "from": from_email,
+                "date": date,
+                "body": body,
+            }
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_email_body(self, msg):
+        """
+        Extract plain text body from email message.
+        """
+        body = ""
+
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                if content_type == "text/plain":
+                    try:
+                        body = part.get_payload(decode=True).decode()
+                        break
+                    except:
+                        pass
+        else:
+            # Simple email
+            try:
+                body = msg.get_payload(decode=True).decode()
+            except:
+                body = msg.get_payload()
+
+        return body
