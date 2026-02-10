@@ -72,6 +72,17 @@ class EmailAgent:
         for tool in self.available_tools:
             print(f"   - {tool.name}")
 
+    async def cleanup(self):
+        """
+        Cleanup when shutting down the agent.
+
+        Properly closes the MCP session and client connection.
+        """
+        if self.session:
+            await self.session.__aexit__(None, None, None)
+        if hasattr(self, "client_context"):
+            await self.client_context.__aexit__(None, None, None)
+
     async def process_command(self, user_input: str) -> str:
         """
         Process a user command using the LLM.
