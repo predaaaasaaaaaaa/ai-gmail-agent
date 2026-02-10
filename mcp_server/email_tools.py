@@ -172,3 +172,31 @@ class GmailHandler:
                 body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
 
         return body
+
+    def send_email(self, to, subject, body):
+        """
+        Send an email from your Gmail account.
+        """
+        try:
+            # Create the email
+            message = MIMEText(body)
+            message["to"] = to
+            message["subject"] = subject
+
+            # Encode in base64
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+            # Send it
+            send_result = (
+                self.service.users()
+                .messages()
+                .send(userId="me", body={"raw": raw_message})
+                .execute()
+            )
+
+            return {"status": "sent", "message_id": send_result["id"]}
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    
