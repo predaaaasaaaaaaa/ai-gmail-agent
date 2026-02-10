@@ -109,3 +109,66 @@ class GmailHandler:
 
         except Exception as e:
             return {"error": str(e)}
+
+    def read_email(self, email_id):
+        """
+        Get the full content of a specific email.
+        """
+        try:
+            msg = (
+                self.service.users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=email_id,
+                    format="full",  # Get full email including body
+                )
+                .execute()
+            )
+
+            # Extract headers
+            headers = msg["payload"]["headers"]
+            subject = next(
+                (h["value"] for h in headers if h["name"] == "Subject"), "No Subject"
+            )
+            from_email = next(
+                (h["value"] for h in headers if h["name"] == "From"), "Unknown"
+            )
+            date = next((h["value"] for h in headers if h["name"] == "Date"), "Unknown")
+
+            # Extract body (this is the tricky part)
+            body = self._get_email_body(msg["payload"])
+
+            return {
+                "id": email_id,
+                "subject": subject,
+                "from": from_email,
+                "date": date,
+                "body": body,
+            }
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_email_body(self, payload):
+        """
+        Helper function to extract email body from Gmail's nested structure.
+        """
+        body = ""
+
+        # Check if email has parts (multipart)
+        if "parts" in payload:
+            for part in payload["parts"]:
+                if part["mimeType"] == "text/plain":
+                    # Plain text found - decode it
+                    if "data" in part["body"]:
+                        body = base64.urlsafe_b64decode(part["body"]["data"]).decode(
+                            "utf-8"
+                        )
+                        break
+        else:
+            # Simple email - body is directly in payload
+            if "body" in payload and "data" in payload["body"]:
+                body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+
+        return body
