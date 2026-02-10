@@ -1,88 +1,52 @@
 """
-Email Agent Client - Simplified Version
+Email Agent Client - MCP Powered Version
 """
 
 import asyncio
 import json
 import os
-import sys
-from pathlib import Path
 from groq import Groq
 from dotenv import load_dotenv
+from mcp_client import MCPEmailClient
 
 # Load environment
 load_dotenv()
 
+
 class EmailAgent:
+    """
+    Email agent powered by MCP and Groq.
+    
+    Architecture:
+    You → Agent → Groq (decides what to do) → MCP Client → MCP Server → Email handlers
+    """
+    
     def __init__(self):
-        """Simple email agent without MCP for now."""
         self.groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+        self.mcp_client = None
         self.conversation_history = []
-        
-        # Import email handlers directly (no MCP for v1)
-        sys.path.insert(0, str(Path(__file__).parent.parent / "mcp_server"))
-        from email_tools import GmailHandler, iCloudHandler
-        
-        print("🔧 Initializing email handlers...")
-        self.gmail = GmailHandler(credentials_path='credentials.json')
-        self.icloud = iCloudHandler()
-        print("✅ Email handlers ready")
+        self.available_tools = []
     
-    def execute_tool(self, tool_name: str, **kwargs):
-        """
-        Execute an email tool.
-        
-        Available tools:
-        - list_gmail_emails
-        - list_icloud_emails
-        - read_gmail_email
-        - read_icloud_email
-        - send_gmail_email
-        - send_icloud_email
-        """
-        try:
-            if tool_name == "list_gmail_emails":
-                return self.gmail.list_emails(
-                    max_results=kwargs.get('max_results', 10),
-                    query=kwargs.get('query', '')
-                )
-            
-            elif tool_name == "list_icloud_emails":
-                return self.icloud.list_emails(
-                    max_results=kwargs.get('max_results', 10)
-                )
-            
-            elif tool_name == "read_gmail_email":
-                return self.gmail.read_email(kwargs['email_id'])
-            
-            elif tool_name == "read_icloud_email":
-                return self.icloud.read_email(kwargs['email_id'])
-            
-            elif tool_name == "send_gmail_email":
-                return self.gmail.send_email(
-                    kwargs['to'],
-                    kwargs['subject'],
-                    kwargs['body']
-                )
-            
-            elif tool_name == "send_icloud_email":
-                return self.icloud.send_email(
-                    kwargs['to'],
-                    kwargs['subject'],
-                    kwargs['body']
-                )
-            
-            else:
-                return {"error": f"Unknown tool: {tool_name}"}
-                
-        except Exception as e:
-            return {"error": str(e)}
+    async def connect_mcp(self):
+        """Connect to MCP server and get available tools."""
+        self.mcp_client = await MCPEmailClient().__aenter__()
+        self.available_tools = self.mcp_client.available_tools
+        return self.mcp_client
     
-    def process_command(self, user_input: str) -> str:
+    async def cleanup_mcp(self):
+        """Cleanup MCP connection."""
+        if self.mcp_client:
+            await self.mcp_client.__aexit__(None, None, None)
+    
+    async def process_command(self, user_input: str) -> str:
         """
-        Process user command with Groq.
+        Process user command with Groq + MCP.
         
-        The LLM will tell us which tools to call in JSON format.
+        Flow:
+        1. User asks something
+        2. Groq decides which tool to call
+        3. We call it via MCP
+        4. Return formatted result
         """
         # Add to history
         self.conversation_history.append({
@@ -90,32 +54,33 @@ class EmailAgent:
             "content": user_input
         })
         
+        # Build tool descriptions for Groq
+        tools_desc = "\n".join([
+            f"- {tool.name}: {tool.description}"
+            for tool in self.available_tools
+        ])
+        
         # System prompt
-        system_prompt = """You are an email assistant. You have these tools available:
+        system_prompt = f"""You are an email assistant with access to these MCP tools:
 
-1. list_gmail_emails(max_results, query) - List Gmail emails
-2. list_icloud_emails(max_results) - List iCloud emails
-3. read_gmail_email(email_id) - Read full Gmail email
-4. read_icloud_email(email_id) - Read full iCloud email
-5. send_gmail_email(to, subject, body) - Send Gmail
-6. send_icloud_email(to, subject, body) - Send iCloud email
+{tools_desc}
 
 When the user asks you to do something, respond with a JSON object:
-{
+{{
     "action": "call_tool" or "respond",
     "tool": "tool_name",
-    "params": {...},
+    "params": {{}},
     "message": "what to tell the user"
-}
+}}
 
 Examples:
 User: "check my gmail"
-Response: {"action": "call_tool", "tool": "list_gmail_emails", "params": {"max_results": 10}, "message": "Fetching your Gmail..."}
+{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10}}, "message": "Fetching your Gmail..."}}
 
 User: "hello"
-Response: {"action": "respond", "message": "Hi! I can help you manage your Gmail and iCloud emails. What would you like to do?"}
+{{"action": "respond", "message": "Hi! I can help you manage your emails. What would you like to do?"}}
 
-Always respond with valid JSON only."""
+Always respond with valid JSON only. Be helpful and concise."""
 
         # Call Groq
         response = self.groq_client.chat.completions.create(
@@ -130,21 +95,21 @@ Always respond with valid JSON only."""
         
         assistant_response = response.choices[0].message.content
         
-        # Try to parse as JSON
+        # Parse and execute
         try:
             command = json.loads(assistant_response)
             
             if command.get("action") == "call_tool":
-                # Execute the tool
-                tool_result = self.execute_tool(
+                # Call MCP tool
+                tool_result = await self.mcp_client.call_tool(
                     command["tool"],
                     **command.get("params", {})
                 )
                 
-                # Format result for user
+                # Format result
                 if isinstance(tool_result, list):
                     result_text = f"{command.get('message', 'Results:')}\n\n"
-                    for i, item in enumerate(tool_result[:5], 1):
+                    for i, item in enumerate(tool_result[:10], 1):
                         result_text += f"{i}. From: {item.get('from', 'Unknown')}\n"
                         result_text += f"   Subject: {item.get('subject', 'No subject')}\n"
                         result_text += f"   ID: {item.get('id', 'N/A')}\n\n"
@@ -156,7 +121,6 @@ Always respond with valid JSON only."""
                 final_response = command.get("message", assistant_response)
         
         except json.JSONDecodeError:
-            # If not JSON, just return the response
             final_response = assistant_response
         
         self.conversation_history.append({
@@ -167,13 +131,16 @@ Always respond with valid JSON only."""
         return final_response
 
 
-def main():
-    """Simple synchronous main loop."""
-    print("🤖 Email Agent starting...")
+async def main():
+    """Async main loop for the MCP-powered agent."""
+    print("🤖 Email Agent starting (MCP Mode)...")
     print("=" * 50)
     
+    agent = EmailAgent()
+    
     try:
-        agent = EmailAgent()
+        # Connect to MCP
+        await agent.connect_mcp()
         
         print("\n" + "=" * 50)
         print("✨ Agent ready!")
@@ -181,27 +148,36 @@ def main():
         print("Type 'exit' to quit")
         print("=" * 50 + "\n")
         
+        # Main loop
         while True:
-            user_input = input("You: ").strip()
+            try:
+                # Get input (run in executor to not block async)
+                loop = asyncio.get_event_loop()
+                user_input = await loop.run_in_executor(
+                    None, 
+                    lambda: input("You: ").strip()
+                )
+                
+                if user_input.lower() in ['exit', 'quit', 'bye']:
+                    print("👋 Goodbye!")
+                    break
+                
+                if not user_input:
+                    continue
+                
+                print("🤔 Processing...")
+                response = await agent.process_command(user_input)
+                print(f"\n🤖 Agent:\n{response}\n")
             
-            if user_input.lower() in ['exit', 'quit', 'bye']:
-                print("👋 Goodbye!")
+            except KeyboardInterrupt:
+                print("\n👋 Goodbye!")
                 break
-            
-            if not user_input:
-                continue
-            
-            print("🤔 Processing...")
-            response = agent.process_command(user_input)
-            print(f"\n🤖 Agent:\n{response}\n")
     
-    except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+    finally:
+        # Cleanup MCP
+        print("🧹 Cleaning up...")
+        await agent.cleanup_mcp()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
