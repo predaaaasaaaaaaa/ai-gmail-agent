@@ -170,13 +170,40 @@ async def main():
                 print(f"\n🤖 Agent:\n{response}\n")
             
             except KeyboardInterrupt:
-                print("\n👋 Goodbye!")
+                # Ctrl+C during input
+                print("\n\n👋 Goodbye!")
+                break
+            
+            except asyncio.CancelledError:
+                # Async task cancelled (Ctrl+C during execution)
+                print("\n\n👋 Goodbye!")
                 break
     
+    except KeyboardInterrupt:
+        # Ctrl+C during startup
+        print("\n\n👋 Goodbye!")
+    
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+    
     finally:
-        # Cleanup MCP
+        # Always cleanup MCP
         print("🧹 Cleaning up...")
-        await agent.cleanup_mcp()
+        try:
+            await agent.cleanup_mcp()
+            print("✅ Cleanup complete!")
+        except Exception:
+            pass  # Suppress cleanup errors
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Final catch for any Ctrl+C
+        print("\n👋 Exited cleanly!")
 
 
 if __name__ == "__main__":
