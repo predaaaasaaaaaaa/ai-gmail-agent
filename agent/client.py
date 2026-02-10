@@ -154,42 +154,48 @@ async def main():
     # Initialize agent
     agent = EmailAgent()
 
-    # Connect to MCP server
-    await agent.connect_to_mcp_server()
+    try:
+        # Connect to MCP server
+        await agent.connect_to_mcp_server()
 
-    print("\n" + "=" * 50)
-    print("✨ Agent ready! Type your commands.")
-    print("💡 Examples:")
-    print("   - check my gmail")
-    print("   - show me unread emails")
-    print("   - read the latest email")
-    print("   - send an email to someone@example.com")
-    print("\nType 'exit' to quit")
-    print("=" * 50 + "\n")
+        print("\n" + "=" * 50)
+        print("✨ Agent ready! Type your commands.")
+        print("💡 Examples:")
+        print("   - check my gmail")
+        print("   - show me unread emails")
+        print("   - read the latest email")
+        print("   - send an email to someone@example.com")
+        print("\nType 'exit' to quit")
+        print("=" * 50 + "\n")
 
-    # Main loop
-    while True:
-        try:
-            # Get user input
-            user_input = input("You: ").strip()
+        # Main loop
+        while True:
+            try:
+                # Get user input
+                user_input = input("You: ").strip()
 
-            if user_input.lower() in ["exit", "quit", "bye"]:
-                print("👋 Goodbye!")
+                if user_input.lower() in ["exit", "quit", "bye"]:
+                    print("👋 Goodbye!")
+                    break
+
+                if not user_input:
+                    continue
+
+                # Process command
+                print("🤔 Thinking...")
+                response = await agent.process_command(user_input)
+                print(f"\n🤖 Agent: {response}\n")
+
+            except KeyboardInterrupt:
+                print("\n👋 Goodbye!")
                 break
+            except Exception as e:
+                print(f"❌ Error: {e}")
 
-            if not user_input:
-                continue
-
-            # Process command
-            print("🤔 Thinking...")
-            response = await agent.process_command(user_input)
-            print(f"\n🤖 Agent: {response}\n")
-
-        except KeyboardInterrupt:
-            print("\n👋 Goodbye!")
-            break
-        except Exception as e:
-            print(f"❌ Error: {e}")
+    finally:
+        # Cleanup on exit
+        print("🧹 Cleaning up...")
+        await agent.cleanup()
 
 
 if __name__ == "__main__":
