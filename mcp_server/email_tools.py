@@ -199,4 +199,102 @@ class GmailHandler:
         except Exception as e:
             return {"error": str(e)}
 
-    
+
+import imaplib
+import smtplib
+import email
+from email.header import decode_header
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+
+class iCloudHandler:
+    def __init__(self):
+        """
+        iCloud email handler using IMAP and SMTP.
+        """
+        self.email = os.getenv("ICLOUD_EMAIL")
+        self.password = os.getenv("ICLOUD_PASSWORD")
+        self.imap_server = "imap.mail.me.com"
+        self.smtp_server = "smtp.mail.me.com"
+        self.imap_port = 993
+        self.smtp_port = 587
+
+    def list_emails(self, max_results=10, mailbox="INBOX"):
+        """
+        Fetch emails from iCloud using IMAP.
+        """
+        try:
+            # Connect to IMAP server
+            mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+            mail.login(self.email, self.password)
+
+            # Select mailbox
+            mail.select(mailbox)
+
+            # Search for all emails (or you can filter with search criteria)
+            # 'ALL' = get all emails
+            # 'UNSEEN' = only unread emails
+            # 'FROM "someone@example.com"' = emails from specific sender
+            status, messages = mail.search(None, "ALL")
+
+            # Get list of email IDs
+            email_ids = messages[0].split()
+
+            # Get the most recent emails (IMAP returns oldest first, so reverse)
+            email_ids = email_ids[-max_results:][::-1]
+
+            email_list = []
+
+            for email_id in email_ids:
+                # Fetch email headers only (faster than fetching full body)
+                status, msg_data = mail.fetch(email_id, "(RFC822.HEADER)")
+
+                # Parse the email
+                msg = email.message_from_bytes(msg_data[0][1])
+
+                # Decode subject (might be encoded)
+                subject = self._decode_header(msg.get("Subject", "No Subject"))
+                from_email = msg.get("From", "Unknown")
+                date = msg.get("Date", "Unknown")
+
+                email_list.append(
+                    {
+                        "id": email_id.decode(),
+                        "subject": subject,
+                        "from": from_email,
+                        "date": date,
+                        "snippet": f"iCloud email from {from_email}",  # IMAP doesn't have snippets
+                    }
+                )
+
+            mail.close()
+            mail.logout()
+
+            return email_list
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _decode_header(self, header):
+        """
+        Decode email headers that might be encoded.
+        """
+        if header is None:
+            return ""
+
+        decoded_parts = decode_header(header)
+        decoded_header = ""
+
+        for part, encoding in decoded_parts:
+            if isinstance(part, bytes):
+                decoded_header += part.decode(encoding or "utf-8")
+            else:
+                decoded_header += part
+
+        return decoded_header
