@@ -358,3 +358,29 @@ class iCloudHandler:
                 body = msg.get_payload()
 
         return body
+
+    def send_email(self, to, subject, body):
+        """
+        Send email via iCloud SMTP.
+        """
+        try:
+            # Create email message
+            msg = MIMEMultipart()
+            msg["From"] = self.email
+            msg["To"] = to
+            msg["Subject"] = subject
+            msg.attach(MIMEText(body, "plain"))
+
+            # Connect to SMTP server
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.starttls()  # Enable encryption
+            server.login(self.email, self.password)
+
+            # Send email
+            server.send_message(msg)
+            server.quit()
+
+            return {"status": "sent", "to": to}
+
+        except Exception as e:
+            return {"error": str(e)}
