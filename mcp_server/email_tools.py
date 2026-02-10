@@ -8,26 +8,29 @@ import base64
 from email.mime.text import MIMEText
 
 # Gmail API scopes - permissions needed
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly',
-          'https://www.googleapis.com/auth/gmail.send']
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+]
+
 
 class GmailHandler:
-    def __init__(self, credentials_path='credentials.json'):
+    def __init__(self, credentials_path="credentials.json"):
         self.credentials_path = credentials_path
         self.service = None
         self._authenticate()
-    
+
     def _authenticate(self):
         """
         Handles OAuth 2.0 authentication with Gmail.
         """
         creds = None
-        
+
         # Check for saved credentials
-        if os.path.exists('token.pickle'):
-            with open('token.pickle', 'rb') as token:
+        if os.path.exists("token.pickle"):
+            with open("token.pickle", "rb") as token:
                 creds = pickle.load(token)
-        
+
         # If no valid credentials, get new ones
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
@@ -36,12 +39,73 @@ class GmailHandler:
             else:
                 # Do full OAuth flow (opens browser)
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    self.credentials_path, SCOPES)
+                    self.credentials_path, SCOPES
+                )
                 creds = flow.run_local_server(port=0)
-            
+
             # Save credentials for next time
-            with open('token.pickle', 'wb') as token:
+            with open("token.pickle", "wb") as token:
                 pickle.dump(creds, token)
-        
+
         # Build the Gmail service
-        self.service = build('gmail', 'v1', credentials=creds)
+        self.service = build("gmail", "v1", credentials=creds)
+
+    def list_emails(self, max_results=10, query=""):
+        """
+        Fetch a list of emails from inbox.
+        """
+        try:
+            # Get list of message IDs
+            results = (
+                self.service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    maxResults=max_results,
+                    q=query,  # Gmail search syntax
+                )
+                .execute()
+            )
+
+            messages = results.get("messages", [])
+
+            if not messages:
+                return []
+
+            # Fetch details for each message
+            email_list = []
+            for message in messages:
+                msg = (
+                    self.service.users()
+                    .messages()
+                    .get(
+                        userId="me",
+                        id=message["id"],
+                        format="metadata",  # Only get headers, not full body
+                        metadataHeaders=["From", "Subject", "Date"],
+                    )
+                    .execute()
+                )
+
+                # Extract headers
+                headers = msg["payload"]["headers"]
+                email_data = {
+                    "id": msg["id"],
+                    "snippet": msg.get("snippet", ""),  # Preview text
+                    "from": next(
+                        (h["value"] for h in headers if h["name"] == "From"), "Unknown"
+                    ),
+                    "subject": next(
+                        (h["value"] for h in headers if h["name"] == "Subject"),
+                        "No Subject",
+                    ),
+                    "date": next(
+                        (h["value"] for h in headers if h["name"] == "Date"), "Unknown"
+                    ),
+                }
+                email_list.append(email_data)
+
+            return email_list
+
+        except Exception as e:
+            return {"error": str(e)}
