@@ -2,6 +2,17 @@
 MCP Server for Email Operations
 """
 
+# FORCE RELOAD - prevents Python from using cached imports
+import sys
+import importlib
+
+# Clear any cached email_tools
+if 'email_tools' in sys.modules:
+    importlib.reload(sys.modules['email_tools'])
+
+import asyncio
+from pathlib import Path
+
 import asyncio
 import sys
 from pathlib import Path
