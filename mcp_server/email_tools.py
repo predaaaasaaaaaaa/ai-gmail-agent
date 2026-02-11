@@ -225,59 +225,72 @@ class iCloudHandler:
         self.imap_port = 993
         self.smtp_port = 587
 
-    def list_emails(self, max_results=10, mailbox="INBOX"):
+    def list_emails(self, max_results=10, mailbox='INBOX'):
         """
         Fetch emails from iCloud using IMAP.
+        
+        Args:
+            max_results: Number of emails to fetch
+            mailbox: Which folder to read from (INBOX, Sent, Drafts, etc.)
+        
+        Returns:
+            List of email metadata
         """
         try:
             # Connect to IMAP server
             mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
             mail.login(self.email, self.password)
-
+            
             # Select mailbox
             mail.select(mailbox)
-
+            
             # Search for all emails
-            status, messages = mail.search(None, "ALL")
-     
+            status, messages = mail.search(None, 'ALL')
+            
             # Get list of email IDs
             email_ids = messages[0].split()
-
+            
             # Get the most recent emails (IMAP returns oldest first, so reverse)
             email_ids = email_ids[-max_results:][::-1]
-
+            
             email_list = []
-
+            
             for email_id in email_ids:
                 # Fetch email headers only (faster than fetching full body)
-                status, msg_data = mail.fetch(email_id, "(RFC822.HEADER)")
-
+                status, msg_data = mail.fetch(email_id, '(RFC822.HEADER)')
+                
                 # Parse the email
                 msg = email.message_from_bytes(msg_data[0][1])
-
+                
                 # Decode subject (might be encoded)
-                subject = self._decode_header(msg.get("Subject", "No Subject"))
-                from_email = msg.get("From", "Unknown")
-                date = msg.get("Date", "Unknown")
- 
-                # FIX: Convert email_id properly - handle both bytes and int
+                subject = self._decode_header(msg.get('Subject', 'No Subject'))
+                from_email = msg.get('From', 'Unknown')
+                date = msg.get('Date', 'Unknown')
+                
+                # CRITICAL FIX: email_id from IMAP is bytes, convert to string
+                # DO NOT call .decode() directly - check type first!
                 if isinstance(email_id, bytes):
                     email_id_str = email_id.decode()
-                else:
+                elif isinstance(email_id, int):
                     email_id_str = str(email_id)
-
+                else:
+                    email_id_str = str(email_id)  # Fallback
+                
                 email_list.append({
-                        "id": email_id_str,    # Now always a string
-                        "subject": subject,
-                        "from": from_email,
-                        "date": date,
-                        "snippet": f"iCloud email from {from_email}",
-                    })
-
+                    'id': email_id_str,  # ← Now always a string, no .decode()
+                    'subject': subject,
+                    'from': from_email,
+                    'date': date,
+                    'snippet': f"iCloud email from {from_email}"
+                })
+            
             mail.close()
             mail.logout()
-
+            
             return email_list
+            
+        except Exception as e:
+            return {'error': str(e)}
 
         except Exception as e:
             return {"error": str(e)}
