@@ -237,16 +237,13 @@ class iCloudHandler:
             # Select mailbox
             mail.select(mailbox)
 
-            # Search for all emails (or you can filter with search criteria)
-            # 'ALL' = get all emails
-            # 'UNSEEN' = only unread emails
-            # 'FROM "someone@example.com"' = emails from specific sender
+            # Search for all emails
             status, messages = mail.search(None, "ALL")
-
+     
             # Get list of email IDs
             email_ids = messages[0].split()
 
-            # Get the most recent emails
+            # Get the most recent emails (IMAP returns oldest first, so reverse)
             email_ids = email_ids[-max_results:][::-1]
 
             email_list = []
@@ -258,20 +255,24 @@ class iCloudHandler:
                 # Parse the email
                 msg = email.message_from_bytes(msg_data[0][1])
 
-                # Decode subject
+                # Decode subject (might be encoded)
                 subject = self._decode_header(msg.get("Subject", "No Subject"))
                 from_email = msg.get("From", "Unknown")
                 date = msg.get("Date", "Unknown")
+ 
+                # FIX: Convert email_id properly - handle both bytes and int
+                if isinstance(email_id, bytes):
+                    email_id_str = email_id.decode()
+                else:
+                    email_id_str = str(email_id)
 
-                email_list.append(
-                    {
+                email_list.append({
                         "id": email_id.decode(),
                         "subject": subject,
                         "from": from_email,
                         "date": date,
                         "snippet": f"iCloud email from {from_email}",
-                    }
-                )
+                    })
 
             mail.close()
             mail.logout()
@@ -308,8 +309,17 @@ class iCloudHandler:
             mail.login(self.email, self.password)
             mail.select("INBOX")
 
+            # FIX: Ensure email_id is bytes for IMAP
+            # Handle both string and int inputs
+            if isinstance(email_id, str):
+                email_id_bytes = email_id.encode()
+            elif isinstance(email_id, int):
+                email_id_bytes = str(email_id).encode()
+            else:
+                email_id_bytes = email_id  # Already bytes
+
             # Fetch the full email
-            status, msg_data = mail.fetch(email_id.encode(), "(RFC822)")
+            status, msg_data = mail.fetch(email_id_bytes, "(RFC822)")
 
             # Parse email
             msg = email.message_from_bytes(msg_data[0][1])
@@ -325,7 +335,7 @@ class iCloudHandler:
             mail.logout()
 
             return {
-                "id": email_id,
+                "id": str(email_id),    # Return as Stringg
                 "subject": subject,
                 "from": from_email,
                 "date": date,
