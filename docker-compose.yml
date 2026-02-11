@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  email-agent:
+    build: .
+    container_name: ai-email-agent
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./credentials.json:/app/credentials.json:ro
+      - ./token.pickle:/app/token.pickle
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+```
