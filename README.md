@@ -204,6 +204,32 @@ You: send an email to john@example.com with subject "Hello" saying "Hi John!"
 
 **To exit:** Type `exit`, `quit`, `bye`, or press `Ctrl+C`
 
+
+## 🐳 Docker Hub (Easiest Method)
+
+**Pull and run directly from Docker Hub:**
+```bash
+# Pull the pre-built image
+docker pull samymetref/ai-email-agent:latest
+
+# Run it (Windows)
+docker run -it --rm `
+  -v ${PWD}/credentials.json:/app/credentials.json:ro `
+  -v ${PWD}/token.pickle:/app/token.pickle `
+  -v ${PWD}/.env:/app/.env:ro `
+  samymetref/ai-email-agent:latest
+
+# Run it (Linux/Mac)
+docker run -it --rm \
+  -v $(pwd)/credentials.json:/app/credentials.json:ro \
+  -v $(pwd)/token.pickle:/app/token.pickle \
+  -v $(pwd)/.env:/app/.env:ro \
+  samymetref/ai-email-agent:latest
+```
+
+**Docker Hub Repository:** [hub.docker.com/r/samymetref/ai-email-agent](https://hub.docker.com/r/samymetref/ai-email-agent)
+
+
 ## 🛠️ How MCP Works
 
 **Model Context Protocol (MCP)** is a standardized way for AI applications to connect to external tools and data sources.
