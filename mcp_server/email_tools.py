@@ -267,7 +267,7 @@ class iCloudHandler:
                     email_id_str = str(email_id)
 
                 email_list.append({
-                        "id": email_id.decode(),
+                        "id": email_id_str,    # Now always a string
                         "subject": subject,
                         "from": from_email,
                         "date": date,
