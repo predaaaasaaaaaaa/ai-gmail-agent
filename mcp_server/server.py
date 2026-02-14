@@ -220,6 +220,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             subject = arguments["subject"]
             body = arguments["body"]
             result = icloud_handler.send_email(to, subject, body)
+        
+        elif name == "search_gmail":
+            query = arguments["query"]
+            max_results = arguments.get("max_results", 20)
+            result = gmail_handler.search_emails(query=query, max_results=max_results)
+            
+        elif name == "search_icloud":
+            sender = arguments["sender"]
+            max_results = arguments.get("max_results", 20)
+            result = icloud_handler.search_emails_by_sender(sender=sender, max_results=max_results)
             
         else:
             result = {"error": f"Unknown tool: {name}"}
