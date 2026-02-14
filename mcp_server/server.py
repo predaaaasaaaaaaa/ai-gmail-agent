@@ -137,6 +137,45 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["to", "subject", "body"]
             }
+        ),
+         Tool(
+            name="search_gmail",
+            description="Search Gmail emails with advanced filters. Supports: from:email, subject:text, after:YYYY/MM/DD, before:YYYY/MM/DD, is:unread, has:attachment. Combine multiple filters with spaces.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Gmail search query (e.g., 'from:john@example.com subject:meeting', 'is:unread after:2024/01/01')"
+                    },
+                    "max_results": {
+                        "type": "number",
+                        "description": "Maximum number of results (default: 20)",
+                        "default": 20
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        
+        Tool(
+            name="search_icloud",
+            description="Search iCloud emails. Note: iCloud IMAP has limited search - best for 'from:' searches. For complex queries, use Gmail.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sender": {
+                        "type": "string",
+                        "description": "Email address or name to search for in 'From' field"
+                    },
+                    "max_results": {
+                        "type": "number",
+                        "description": "Maximum number of results (default: 20)",
+                        "default": 20
+                    }
+                },
+                "required": ["sender"]
+            }
         )
     ]
 
