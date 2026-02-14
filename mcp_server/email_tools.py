@@ -536,3 +536,52 @@ class iCloudHandler:
             
         except Exception as e:
             return {'error': str(e)}
+        
+    def draft_reply(self, email_id: str, reply_body: str):
+        """
+        Draft a reply to a specific iCloud email.
+        """
+        try:
+            # Get the original email
+            original = self.read_email(email_id)
+            
+            if 'error' in original:
+                return original
+            
+            # Extract sender email
+            from_header = original['from']
+            
+            import re
+            email_match = re.search(r'<(.+?)>', from_header)
+            if email_match:
+                recipient = email_match.group(1)
+            else:
+                recipient = from_header.strip()
+            
+            # Create reply subject
+            original_subject = original['subject']
+            if not original_subject.lower().startswith('re:'):
+                reply_subject = f"Re: {original_subject}"
+            else:
+                reply_subject = original_subject
+            
+            # Return draft for approval
+            return {
+                'status': 'draft_created',
+                'to': recipient,
+                'subject': reply_subject,
+                'body': reply_body,
+                'original_email_id': email_id,
+                'message': 'Draft created. User must approve before sending.'
+            }
+            
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def send_reply(self, to: str, subject: str, body: str):
+        """
+        Send a reply email (after user approval).
+        
+        Wrapper around send_email for clarity.
+        """
+        return self.send_email(to, subject, body)
