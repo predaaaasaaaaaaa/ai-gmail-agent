@@ -176,6 +176,44 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["sender"]
             }
+        ),
+
+        Tool(
+            name="draft_gmail_reply",
+            description="Draft a reply to a specific Gmail email. Returns the draft content for user approval before sending.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "email_id": {
+                        "type": "string",
+                        "description": "The Gmail message ID to reply to"
+                    },
+                    "reply_body": {
+                        "type": "string",
+                        "description": "The body text of the reply email"
+                    }
+                },
+                "required": ["email_id", "reply_body"]
+            }
+        ),
+        
+        Tool(
+            name="draft_icloud_reply",
+            description="Draft a reply to a specific iCloud email. Returns the draft content for user approval before sending.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "email_id": {
+                        "type": "string",
+                        "description": "The iCloud message ID to reply to"
+                    },
+                    "reply_body": {
+                        "type": "string",
+                        "description": "The body text of the reply email"
+                    }
+                },
+                "required": ["email_id", "reply_body"]
+            }
         )
     ]
 
