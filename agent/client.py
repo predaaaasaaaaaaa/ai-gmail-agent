@@ -26,6 +26,7 @@ class EmailAgent:
         self.mcp_client = None
         self.conversation_history = []
         self.available_tools = []
+        self.pending_draft = None
     
     async def connect_mcp(self):
         """Connect to MCP server and get available tools."""
