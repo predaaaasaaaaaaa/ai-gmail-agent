@@ -114,13 +114,6 @@ class GmailHandler:
         """
         Search Gmail with advanced query syntax.
         
-        Args:
-            query: Gmail search query (e.g., "from:john@example.com subject:meeting")
-            max_results: Maximum results to return
-        
-        Returns:
-            List of matching emails
-        
         Examples of queries:
         - "from:john@example.com" - emails from John
         - "subject:meeting" - emails with "meeting" in subject
@@ -429,3 +422,69 @@ class iCloudHandler:
 
         except Exception as e:
             return {"error": str(e)}
+    
+    def search_emails_by_sender(self, sender: str, max_results=20):
+        """
+        Search iCloud emails by sender.
+        
+        Note: iCloud IMAP has very limited search capabilities compared to Gmail.
+        This searches for emails where the 'From' field contains the sender string.
+        """
+        try:
+            mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+            mail.login(self.email, self.password)
+            mail.select('INBOX')
+            
+            search_criteria = f'(FROM "{sender}")'
+            status, messages = mail.search(None, search_criteria)
+            
+            if status != 'OK':
+                mail.close()
+                mail.logout()
+                return {'error': 'Search failed'}
+            
+            # Get email IDs
+            email_ids = messages[0].split()
+            
+            if not email_ids:
+                mail.close()
+                mail.logout()
+                return []
+            
+            # Get most recent matches
+            email_ids = email_ids[-max_results:][::-1]
+            
+            email_list = []
+            
+            for email_id in email_ids:
+                status, msg_data = mail.fetch(email_id, '(RFC822.HEADER)')
+                
+                msg = email.message_from_bytes(msg_data[0][1])
+                
+                subject = self._decode_header(msg.get('Subject', 'No Subject'))
+                from_email = msg.get('From', 'Unknown')
+                date = msg.get('Date', 'Unknown')
+                
+                # Convert email_id properly
+                if isinstance(email_id, bytes):
+                    email_id_str = email_id.decode()
+                elif isinstance(email_id, int):
+                    email_id_str = str(email_id)
+                else:
+                    email_id_str = str(email_id)
+                
+                email_list.append({
+                    'id': email_id_str,
+                    'subject': subject,
+                    'from': from_email,
+                    'date': date,
+                    'snippet': f"iCloud email from {from_email}"
+                })
+            
+            mail.close()
+            mail.logout()
+            
+            return email_list
+            
+        except Exception as e:
+            return {'error': str(e)}
