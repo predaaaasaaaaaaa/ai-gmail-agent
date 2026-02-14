@@ -268,6 +268,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             sender = arguments["sender"]
             max_results = arguments.get("max_results", 20)
             result = icloud_handler.search_emails_by_sender(sender=sender, max_results=max_results)
+        
+        elif name == "draft_gmail_reply":
+            email_id = arguments["email_id"]
+            reply_body = arguments["reply_body"]
+            result = gmail_handler.draft_reply(email_id, reply_body)
+            
+        elif name == "draft_icloud_reply":
+            email_id = arguments["email_id"]
+            reply_body = arguments["reply_body"]
+            result = icloud_handler.draft_reply(email_id, reply_body)
             
         else:
             result = {"error": f"Unknown tool: {name}"}
