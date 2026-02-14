@@ -43,12 +43,52 @@ class EmailAgent:
         """
         Process user command with Groq + MCP.
         
-        Flow:
-        1. User asks something
-        2. Groq decides which tool to call
-        3. We call it via MCP
-        4. Return formatted result
+        Handles draft approvals specially.
         """
+        # Check if user is responding to a pending draft
+        if self.pending_draft:
+            user_response = user_input.lower().strip()
+            
+            if user_response in ['yes', 'y', 'send', 'send it']:
+                # User approved - send the email!
+                draft = self.pending_draft
+                self.pending_draft = None 
+                
+                # Determine which account to use
+                if 'gmail' in draft.get('account', 'gmail'):
+                    result = await self.mcp_client.call_tool(
+                        "send_gmail_email",
+                        to=draft['to'],
+                        subject=draft['subject'],
+                        body=draft['body']
+                    )
+                else:
+                    result = await self.mcp_client.call_tool(
+                        "send_icloud_email",
+                        to=draft['to'],
+                        subject=draft['subject'],
+                        body=draft['body']
+                    )
+                
+                if 'error' in result:
+                    return f"❌ Failed to send: {result['error']}"
+                else:
+                    return f"✅ Email sent to {draft['to']}!"
+            
+            elif user_response in ['no', 'n', 'cancel', 'abort']:
+                # User cancelled
+                self.pending_draft = None
+                return "❌ Draft cancelled. Email not sent."
+            
+            elif user_response in ['edit', 'modify', 'change']:
+                # User wants to edit (future feature)
+                self.pending_draft = None
+                return "✏️ Draft editing not implemented yet. Please draft a new reply with your changes."
+            
+            else:
+                # User said something else while draft is pending
+                return "⚠️ You have a pending draft. Please respond with:\n- 'yes' to send\n- 'no' to cancel\n- 'edit' to modify (not implemented yet)"
+        
         # Add to history
         self.conversation_history.append({
             "role": "user",
@@ -66,9 +106,11 @@ class EmailAgent:
 
 {tools_desc}
 
-SEARCH CAPABILITIES:
-- Gmail: Use search_gmail with queries like "from:john@example.com", "subject:meeting", "is:unread after:2024/01/01"
-- iCloud: Use search_icloud with sender parameter (limited search compared to Gmail)
+IMPORTANT INSTRUCTIONS:
+1. For draft replies: Use draft_gmail_reply or draft_icloud_reply tools. The agent will handle user approval.
+2. When user says "draft a reply to X", first find the email, then use the draft tool with AI-generated reply text.
+3. For searches: Use search_gmail with Gmail query syntax (from:, subject:, is:unread, etc.)
+4. Always be helpful and professional in generated email text.
 
 When the user asks you to do something, respond with a JSON object:
 {{
@@ -79,16 +121,11 @@ When the user asks you to do something, respond with a JSON object:
 }}
 
 Examples:
-User: "check my gmail"
-{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10}}, "message": "Fetching your Gmail..."}}
+User: "draft a reply to john's email"
+{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john", "max_results": 1}}, "message": "Finding John's email..."}}
+Then: {{"action": "call_tool", "tool": "draft_gmail_reply", "params": {{"email_id": "xxx", "reply_body": "AI-generated professional reply"}}, "message": "Drafting reply..."}}
 
-User: "find emails from john@example.com"
-{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john@example.com", "max_results": 20}}, "message": "Searching for emails from john@example.com..."}}
-
-User: "show me unread emails about meetings"
-{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "is:unread subject:meeting", "max_results": 20}}, "message": "Searching for unread emails about meetings..."}}
-
-Always respond with valid JSON only. Be helpful and concise."""
+Always respond with valid JSON only."""
 
         # Call Groq
         response = self.groq_client.chat.completions.create(
@@ -114,8 +151,31 @@ Always respond with valid JSON only. Be helpful and concise."""
                     **command.get("params", {})
                 )
                 
-                # Format result
-                if isinstance(tool_result, list):
+                # Check if this is a draft reply result
+                if isinstance(tool_result, dict) and tool_result.get('status') == 'draft_created':
+                    # Store the draft and ask for approval
+                    self.pending_draft = {
+                        'to': tool_result['to'],
+                        'subject': tool_result['subject'],
+                        'body': tool_result['body'],
+                        'account': 'gmail' if 'gmail' in command["tool"] else 'icloud'
+                    }
+                    
+                    final_response = f"""📧 Draft Reply Created:
+
+To: {tool_result['to']}
+Subject: {tool_result['subject']}
+
+{tool_result['body']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Should I send this? 
+- Type 'yes' to send
+- Type 'no' to cancel
+- Type 'edit' to modify"""
+                
+                # Format regular tool results
+                elif isinstance(tool_result, list):
                     result_text = f"{command.get('message', 'Results:')}\n\n"
                     for i, item in enumerate(tool_result[:10], 1):
                         result_text += f"{i}. From: {item.get('from', 'Unknown')}\n"
