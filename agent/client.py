@@ -65,6 +65,10 @@ class EmailAgent:
 
 {tools_desc}
 
+SEARCH CAPABILITIES:
+- Gmail: Use search_gmail with queries like "from:john@example.com", "subject:meeting", "is:unread after:2024/01/01"
+- iCloud: Use search_icloud with sender parameter (limited search compared to Gmail)
+
 When the user asks you to do something, respond with a JSON object:
 {{
     "action": "call_tool" or "respond",
@@ -77,8 +81,11 @@ Examples:
 User: "check my gmail"
 {{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10}}, "message": "Fetching your Gmail..."}}
 
-User: "hello"
-{{"action": "respond", "message": "Hi! I can help you manage your emails. What would you like to do?"}}
+User: "find emails from john@example.com"
+{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john@example.com", "max_results": 20}}, "message": "Searching for emails from john@example.com..."}}
+
+User: "show me unread emails about meetings"
+{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "is:unread subject:meeting", "max_results": 20}}, "message": "Searching for unread emails about meetings..."}}
 
 Always respond with valid JSON only. Be helpful and concise."""
 
