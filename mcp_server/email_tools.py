@@ -109,6 +109,28 @@ class GmailHandler:
 
         except Exception as e:
             return {"error": str(e)}
+    
+    def search_emails(self, query: str, max_results=20):
+        """
+        Search Gmail with advanced query syntax.
+        
+        Args:
+            query: Gmail search query (e.g., "from:john@example.com subject:meeting")
+            max_results: Maximum results to return
+        
+        Returns:
+            List of matching emails
+        
+        Examples of queries:
+        - "from:john@example.com" - emails from John
+        - "subject:meeting" - emails with "meeting" in subject
+        - "after:2024/01/01 before:2024/12/31" - date range
+        - "is:unread" - only unread emails
+        - "has:attachment" - emails with attachments
+        - "from:john subject:project is:unread" - combine filters
+        """
+        # This just calls list_emails with the query
+        return self.list_emails(max_results=max_results, query=query)
 
     def read_email(self, email_id):
         """
