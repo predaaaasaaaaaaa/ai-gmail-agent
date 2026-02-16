@@ -324,7 +324,7 @@ Always respond with valid JSON only."""
         
         # Send "processing" message
         processing_msg = await update.message.reply_text(
-            "🎤 Listening to your voice message..."
+            "🎤 Listening..."
         )
         
         try:
@@ -332,51 +332,55 @@ Always respond with valid JSON only."""
             voice = update.message.voice
             voice_file = await context.bot.get_file(voice.file_id)
             
-            # Create temporary file to store audio
+            # Create temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_file:
                 temp_path = temp_file.name
             
-            # Download voice message
+            # Download voice
             await voice_file.download_to_drive(temp_path)
-            logger.info(f"📥 Downloaded voice to: {temp_path}")
             
             # Update status
-            await processing_msg.edit_text("🔄 Transcribing your message...")
+            await processing_msg.edit_text("🔄 Transcribing...")
             
-            # Transcribe with Groq Whisper
+            # Transcribe
             transcribed_text = await self.transcribe_voice(temp_path)
             
-            # Clean up temp file
+            # Clean up
             os.unlink(temp_path)
             
-            if transcribed_text:
-                logger.info(f"📝 Transcribed: {transcribed_text}")
-                
-                # Show user what was heard
+            if not transcribed_text:
                 await processing_msg.edit_text(
-                    f"✅ **I heard:**\n\n"
-                    f"_{transcribed_text}_\n\n"
-                    f"🔧 Processing your request...",
-                    parse_mode='Markdown'
+                    "❌ Couldn't transcribe. Please try again with clearer audio."
                 )
+                return
             
-                # For now, just echo back
-                await update.message.reply_text(
-                    f"📝 You said: _{transcribed_text}_\n\n"
-                    f"⚙️ Email processing coming in Phase 3!",
-                    parse_mode='Markdown'
-                )
-            else:
-                await processing_msg.edit_text(
-                    "❌ Sorry, I couldn't transcribe your message.\n"
-                    "Please try again with clearer audio."
-                )
-                
-        except Exception as e:
-            logger.error(f"❌ Error handling voice: {e}")
+            logger.info(f"📝 Transcribed: {transcribed_text}")
+            
+            # Update status
             await processing_msg.edit_text(
-                "❌ Oops! Something went wrong processing your voice message.\n"
-                "Please try again."
+                f"✅ Heard: _{transcribed_text}_\n\n⚙️ Processing...",
+                parse_mode='Markdown'
+            )
+            
+            # Process through MCP agent
+            response_text = await self.process_email_command(transcribed_text)
+            
+            # Send response
+            await update.message.reply_text(
+                f"🤖 **Response:**\n\n{response_text}",
+                parse_mode='Markdown'
+            )
+            
+            # Delete processing message
+            await processing_msg.delete()
+            
+        except Exception as e:
+            logger.error(f"❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            await processing_msg.edit_text(
+                "❌ Something went wrong. Please try again."
             )
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
