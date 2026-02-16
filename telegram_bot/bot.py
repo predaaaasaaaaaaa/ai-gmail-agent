@@ -11,6 +11,7 @@ This bot:
 import os
 import logging
 import tempfile
+import sys
 from pathlib import Path
 from telegram import Update
 from telegram.ext import (
@@ -22,6 +23,9 @@ from telegram.ext import (
 )
 from dotenv import load_dotenv
 from groq import Groq
+
+sys.path.insert(0, str(Path(__file__).parent.parent))  # Add project root to path
+from agent.mcp_client import MCPEmailClient 
 
 # Load environment variables
 load_dotenv()
