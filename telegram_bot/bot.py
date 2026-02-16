@@ -426,14 +426,15 @@ Always respond with valid JSON only."""
         except Exception as e:
             logger.error(f"❌ MCP connection failed: {e}")
             raise
-    
-def run(self):
+
+    async def run_async(self):
         """
-        Start the bot.
+        Async bot startup.
         """
-        logger.info("🚀 Starting Telegram bot...")
+        # Connect to MCP first
+        await self.connect_mcp_async()
         
-        # Create application
+        # Build application
         app = Application.builder().token(self.token).build()
         
         # Add handlers
@@ -443,11 +444,17 @@ def run(self):
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_error_handler(self.error_handler)
         
-        logger.info("✅ Bot configured")
+        logger.info("✅ Bot ready!")
         
         # Start polling
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
-
+        await app.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    def run(self):
+        """
+        Start the bot (wrapper).
+        """
+        import asyncio
+        asyncio.run(self.run_async())
 
 def main():
     bot = EmailBot()
