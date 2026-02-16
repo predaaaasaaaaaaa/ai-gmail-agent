@@ -119,13 +119,13 @@ Send voice messages to control your email:
         3. Process through MCP agent (next step)
         4. Respond with TTS (next step)
         """
-        logger.info(f"📥 Received voice message from {updateeffective_user.first_name}")
+        logger.info(f"📥 Received voice message from {update.effective_user.first_name}")
         
         # For now, just acknowledge receipt
         await update.message.reply_text(
             "🎤 Voice message received!\n\n"
             "🔧 Transcription coming in next step...\n\n"
-            f"Duration: {update.message.voice.duration}s
+            f"Duration: {update.message.voice.duration}s"
         )
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
