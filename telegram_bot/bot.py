@@ -112,12 +112,6 @@ Send voice messages to control your email:
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Handle voice messages from users.
-        
-        Flow:
-        1. Download voice file
-        2. Transcribe with Groq Whisper (next step)
-        3. Process through MCP agent (next step)
-        4. Respond with TTS (next step)
         """
         logger.info(f"📥 Received voice message from {update.effective_user.first_name}")
         
@@ -131,9 +125,6 @@ Send voice messages to control your email:
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Handle text messages.
-        
-        For now, encourage users to use voice.
-        Later, we can support both text and voice.
         """
         await update.message.reply_text(
             "💬 I see you sent text!\n\n"
@@ -157,8 +148,6 @@ Send voice messages to control your email:
     def run(self):
         """
         Start the bot.
-        
-        This creates the application and starts polling for messages.
         """
         logger.info("🚀 Starting Telegram bot...")
         
