@@ -415,16 +415,18 @@ Always respond with valid JSON only."""
         try:
             logger.info("🔌 Connecting to MCP server...")
             
+            # Create MCP client
             self.mcp_client = MCPEmailClient()
             
-            # Connect and get session
-            async for session in self.mcp_client.connect():
-                self.mcp_session = session
-                logger.info(f"✅ MCP connected - {len(self.mcp_client.available_tools)} tools available")
-                break  # We only need one session
+            # Connect using async context manager
+            self.mcp_client = await self.mcp_client.__aenter__()
+            
+            logger.info(f"✅ MCP connected - {len(self.mcp_client.available_tools)} tools available")
                 
         except Exception as e:
             logger.error(f"❌ MCP connection failed: {e}")
+            import traceback
+            traceback.print_exc()
             raise
 
     async def run_async(self):
