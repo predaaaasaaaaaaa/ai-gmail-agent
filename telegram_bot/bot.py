@@ -156,6 +156,165 @@ Send voice messages to control your email:
             logger.error(f"❌ Transcription error: {e}")
             return None
     
+    async def process_email_command(self, command: str) -> str:
+        """
+        Process email command through MCP agent.
+        
+        Args:
+            command: Transcribed voice command (e.g., "check my gmail")
+        
+        Returns:
+            Response text from agent
+        
+        This uses the SAME logic as your CLI agent, but returns text instead.
+        """
+        try:
+            logger.info(f"🧠 Processing command: {command}")
+            
+            # Build tool descriptions for Groq
+            tools_desc = "\n".join([
+                f"- {tool.name}: {tool.description}"
+                for tool in self.mcp_client.available_tools
+            ])
+            
+            # System prompt (same as CLI agent)
+            system_prompt = f"""You are an email assistant with access to these MCP tools:
+
+{tools_desc}
+
+IMPORTANT INSTRUCTIONS:
+1. For draft replies: Use draft_gmail_reply or draft_icloud_reply tools.
+2. For searches: Use search_gmail with Gmail query syntax.
+3. Always be helpful and professional.
+
+When the user asks you to do something, respond with a JSON object:
+{{
+    "action": "call_tool" or "respond",
+    "tool": "tool_name",
+    "params": {{}},
+    "message": "what to tell the user"
+}}
+
+Examples:
+User: "check my gmail"
+{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 5}}, "message": "Fetching your Gmail..."}}
+
+User: "find emails from john"
+{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john", "max_results": 5}}, "message": "Searching..."}}
+
+Always respond with valid JSON only."""
+
+            # Call Groq to decide what to do
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": command}
+                ],
+                temperature=0.3,
+                max_tokens=1000
+            )
+            
+            assistant_response = response.choices[0].message.content
+            
+            # Parse JSON response
+            import json
+            try:
+                decision = json.loads(assistant_response)
+                
+                if decision.get("action") == "call_tool":
+                    # Call MCP tool
+                    logger.info(f"🔧 Calling tool: {decision['tool']}")
+                    
+                    tool_result = await self.mcp_client.call_tool(
+                        self.mcp_session,
+                        decision["tool"],
+                        **decision.get("params", {})
+                    )
+                    
+                    # Format result for voice response
+                    result_text = self._format_result_for_voice(tool_result, decision)
+                    return result_text
+                
+                else:
+                    # Just respond with message
+                    return decision.get("message", assistant_response)
+                    
+            except json.JSONDecodeError:
+                # Fallback if not valid JSON
+                return assistant_response
+                
+        except Exception as e:
+            logger.error(f"❌ Error processing command: {e}")
+            return "Sorry, I had trouble processing that command. Please try again."
+    
+    def _format_result_for_voice(self, tool_result, decision) -> str:
+        """
+        Format tool results in a voice-friendly way.
+        
+        Voice responses should be:
+        - Concise (people don't like long voice messages)
+        - Natural language (not JSON)
+        - Action-oriented
+        
+        Args:
+            tool_result: Result from MCP tool
+            decision: The decision made by Groq
+        
+        Returns:
+            Formatted text suitable for voice
+        """
+        # Handle list of emails
+        if isinstance(tool_result, list):
+            if not tool_result:
+                return "You have no emails matching that query."
+            
+            # Limit to top 3 for voice (concise)
+            emails_text = f"I found {len(tool_result)} emails. Here are the top 3:\n\n"
+            
+            for i, email in enumerate(tool_result[:3], 1):
+                from_addr = email.get('from', 'Unknown')
+                subject = email.get('subject', 'No subject')
+                emails_text += f"{i}. From {from_addr}\n   Subject: {subject}\n\n"
+            
+            if len(tool_result) > 3:
+                emails_text += f"...and {len(tool_result) - 3} more."
+            
+            return emails_text
+        
+        # Handle single email
+        elif isinstance(tool_result, dict):
+            if 'error' in tool_result:
+                return f"Error: {tool_result['error']}"
+            
+            # Email read result
+            if 'body' in tool_result:
+                return (
+                    f"Email from {tool_result.get('from', 'Unknown')}\n"
+                    f"Subject: {tool_result.get('subject', 'No subject')}\n\n"
+                    f"{tool_result['body'][:500]}..."  # Truncate long emails
+                )
+            
+            # Draft result
+            if tool_result.get('status') == 'draft_created':
+                return (
+                    f"📧 Draft created:\n\n"
+                    f"To: {tool_result['to']}\n"
+                    f"Subject: {tool_result['subject']}\n\n"
+                    f"{tool_result['body']}\n\n"
+                    f"Should I send this? Reply 'yes' or 'no'."
+                )
+            
+            # Send result
+            if tool_result.get('status') == 'sent':
+                return f"✅ Email sent successfully!"
+            
+            # Generic dict
+            return str(tool_result)
+        
+        # Fallback
+        return str(tool_result)
+    
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Handle voice messages from users.
