@@ -406,7 +406,7 @@ Always respond with valid JSON only."""
                 "Please try again or contact support."
             )
     
-    def run(self):
+def run(self):
         """
         Start the bot.
         """
@@ -415,21 +415,16 @@ Always respond with valid JSON only."""
         # Create application
         app = Application.builder().token(self.token).build()
         
-        # Add command handlers
+        # Add handlers
         app.add_handler(CommandHandler("start", self.start_command))
         app.add_handler(CommandHandler("help", self.help_command))
-        
-        # Add message handlers
         app.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
-        
-        # Add error handler
         app.add_error_handler(self.error_handler)
         
-        logger.info("✅ Bot is running! Send /start in Telegram to begin.")
-        logger.info("Press Ctrl+C to stop.")
+        logger.info("✅ Bot configured")
         
-        # Start polling (bot will run forever)
+        # Start polling
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
