@@ -10,6 +10,8 @@ This bot:
 
 import os
 import logging
+import tempfile
+from pathlib import Path
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -19,6 +21,7 @@ from telegram.ext import (
     ContextTypes
 )
 from dotenv import load_dotenv
+from groq import Groq
 
 # Load environment variables
 load_dotenv()
