@@ -405,6 +405,27 @@ Always respond with valid JSON only."""
                 "❌ Oops! Something went wrong.\n"
                 "Please try again or contact support."
             )
+
+    async def connect_mcp_async(self):
+        """
+        Connect to MCP server asynchronously.
+        
+        This is called once when the bot starts.
+        """
+        try:
+            logger.info("🔌 Connecting to MCP server...")
+            
+            self.mcp_client = MCPEmailClient()
+            
+            # Connect and get session
+            async for session in self.mcp_client.connect():
+                self.mcp_session = session
+                logger.info(f"✅ MCP connected - {len(self.mcp_client.available_tools)} tools available")
+                break  # We only need one session
+                
+        except Exception as e:
+            logger.error(f"❌ MCP connection failed: {e}")
+            raise
     
 def run(self):
         """
