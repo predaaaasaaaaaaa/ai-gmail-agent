@@ -118,6 +118,35 @@ Send voice messages to control your email:
             help_message,
             parse_mode='Markdown'
         )
+
+    async def transcribe_voice(self, voice_file_path: str) -> str:
+        """
+        Transcribe voice message using Groq Whisper.
+        
+        Groq Whisper supports:
+        - Multiple languages (auto-detect)
+        - High accuracy
+        - Fast processing
+        """
+        try:
+            logger.info(f"🎤 Transcribing audio file: {voice_file_path}")
+            
+            # Open audio file
+            with open(voice_file_path, 'rb') as audio_file:
+                # Call Groq Whisper API
+                transcription = self.groq_client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-large-v3",  # Groq's Whisper model
+                    language="en",  # Can set to "auto" for auto-detection
+                    response_format="text"
+                )
+            
+            logger.info(f"✅ Transcription: {transcription}")
+            return transcription
+            
+        except Exception as e:
+            logger.error(f"❌ Transcription error: {e}")
+            return None
     
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
