@@ -161,7 +161,7 @@ Send voice messages to control your email:
             logger.info(f"🧠 Processing command: {command}")
 
             # Check if user wants to read a specific email by number
-            read_match = re.search(r"read (?:email )?(?:number )?(\d+)", command.lower())
+            read_match = re.search(r"read\s+(?:email\s+)?(?:number\s+)?(\d+)", command.lower())
             if read_match and user_id and user_id in self.user_last_emails:
                 email_index = int(read_match.group(1)) - 1  # Convert to 0-based index
                 last_emails = self.user_last_emails[user_id]
