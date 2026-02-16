@@ -45,6 +45,13 @@ class EmailBot:
         if not self.token:
             raise ValueError("TELEGRAM_BOT_TOKEN not found in .env")
         
+         # Initialize Groq for transcription
+        self.groq_api_key = os.getenv('GROQ_API_KEY')
+        if not self.groq_api_key:
+            raise ValueError("GROQ_API_KEY not found in .env")
+        
+        self.groq_client = Groq(api_key=self.groq_api_key)
+
         logger.info("✅ Email Bot initialized")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
