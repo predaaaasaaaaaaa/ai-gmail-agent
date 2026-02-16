@@ -56,6 +56,10 @@ class EmailBot:
         
         self.groq_client = Groq(api_key=self.groq_api_key)
 
+        # MCP client
+        self.mcp_client = None
+        self.mcp_session = None
+
         logger.info("✅ Email Bot initialized")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
