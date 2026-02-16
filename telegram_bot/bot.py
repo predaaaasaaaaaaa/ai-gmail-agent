@@ -154,3 +154,39 @@ Send voice messages to control your email:
                 "Please try again or contact support."
             )
     
+    def run(self):
+        """
+        Start the bot.
+        
+        This creates the application and starts polling for messages.
+        """
+        logger.info("🚀 Starting Telegram bot...")
+        
+        # Create application
+        app = Application.builder().token(self.token).build()
+        
+        # Add command handlers
+        app.add_handler(CommandHandler("start", self.start_command))
+        app.add_handler(CommandHandler("help", self.help_command))
+        
+        # Add message handlers
+        app.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
+        
+        # Add error handler
+        app.add_error_handler(self.error_handler)
+        
+        logger.info("✅ Bot is running! Send /start in Telegram to begin.")
+        logger.info("Press Ctrl+C to stop.")
+        
+        # Start polling (bot will run forever)
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+def main():
+    bot = EmailBot()
+    bot.run()
+
+
+if __name__ == "__main__":
+    main()
