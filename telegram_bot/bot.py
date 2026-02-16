@@ -428,15 +428,23 @@ Always respond with valid JSON only."""
             traceback.print_exc()
             raise
 
-    async def run_async(self):
-        """
-        Async bot startup.
-        """
-        # Connect to MCP first
+    async def post_init(self, application):
+        """Called after application is initialized."""
         await self.connect_mcp_async()
+    
+    def run(self):
+        """
+        Start the bot.
+        """
+        logger.info("🚀 Starting Telegram bot...")
         
-        # Build application
-        app = Application.builder().token(self.token).build()
+        # Build application with post_init
+        app = (
+            Application.builder()
+            .token(self.token)
+            .post_init(self.post_init)
+            .build()
+        )
         
         # Add handlers
         app.add_handler(CommandHandler("start", self.start_command))
@@ -445,17 +453,11 @@ Always respond with valid JSON only."""
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_error_handler(self.error_handler)
         
-        logger.info("✅ Bot ready!")
+        logger.info("✅ Bot configured, starting polling...")
         
-        # Start polling
-        await app.run_polling(allowed_updates=Update.ALL_TYPES)
-    
-    def run(self):
-        """
-        Start the bot (wrapper).
-        """
-        import asyncio
-        asyncio.run(self.run_async())
+        # Start polling (this handles the event loop automatically)
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 def main():
     bot = EmailBot()
