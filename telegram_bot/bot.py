@@ -12,6 +12,7 @@ import os
 import logging
 import tempfile
 import sys
+import re
 from pathlib import Path
 from telegram import Update
 from telegram.ext import (
@@ -49,7 +50,7 @@ class EmailBot:
         if not self.token:
             raise ValueError("TELEGRAM_BOT_TOKEN not found in .env")
         
-         # Initialize Groq for transcription
+        # Initialize Groq for transcription
         self.groq_api_key = os.getenv('GROQ_API_KEY')
         if not self.groq_api_key:
             raise ValueError("GROQ_API_KEY not found in .env")
@@ -60,13 +61,14 @@ class EmailBot:
         self.mcp_client = None
         self.mcp_session = None
 
+        # Store last fetched emails per user (for "read email number X")
+        self.user_last_emails = {}
+
         logger.info("✅ Email Bot initialized")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Handle /start command.
-        
-        This is called when user first starts the bot.
         """
         welcome_message = """
 🤖 **AI Email Agent - Voice Edition**
@@ -76,12 +78,12 @@ Welcome! I can help you manage your emails using voice messages.
 **How to use:**
 1. Send me a voice message
 2. I'll transcribe and process your command
-3. I'll respond with voice
+3. I'll respond with text
 
 **Example commands:**
 🎤 "Check my Gmail"
+🎤 "Read email number 1"
 🎤 "Find emails from John"
-🎤 "Draft a reply to Sarah's email"
 🎤 "Send an email to john@example.com"
 
 **Text commands:**
@@ -107,7 +109,7 @@ Send voice messages to control your email:
 
 **Reading Emails:**
 🎤 "Check my Gmail"
-🎤 "Show my iCloud emails"
+🎤 "Read email number 1"
 🎤 "Read my last email"
 
 **Searching:**
@@ -130,11 +132,6 @@ Send voice messages to control your email:
     async def transcribe_voice(self, voice_file_path: str) -> str:
         """
         Transcribe voice message using Groq Whisper.
-
-        Groq Whisper supports:
-        - Multiple languages (auto-detect)
-        - High accuracy
-        - Fast processing
         """
         try:
             logger.info(f"🎤 Transcribing audio file: {voice_file_path}")
@@ -144,8 +141,8 @@ Send voice messages to control your email:
                 # Call Groq Whisper API
                 transcription = self.groq_client.audio.transcriptions.create(
                     file=audio_file,
-                    model="whisper-large-v3",  # Groq's Whisper model
-                    language="en",  # Can set to "auto" for auto-detection
+                    model="whisper-large-v3",
+                    language="en",
                     response_format="text"
                 )
             
@@ -156,28 +153,52 @@ Send voice messages to control your email:
             logger.error(f"❌ Transcription error: {e}")
             return None
     
-    async def process_email_command(self, command: str) -> str:
+    async def process_email_command(self, command: str, user_id: int = None):
         """
         Process email command through MCP agent.
         
         Args:
-            command: Transcribed voice command (e.g., "check my gmail")
+            command: Transcribed voice command
+            user_id: Telegram user ID (for context)
         
         Returns:
-            Response text from agent
-        
-        This uses the SAME logic as your CLI agent, but returns text instead.
+            Tuple of (response_text, email_list or None)
         """
         try:
             logger.info(f"🧠 Processing command: {command}")
             
-            # Build tool descriptions for Groq
+            # Check if user wants to read a specific email by number
+            read_match = re.search(r'read (?:email )?(?:number )?(\d+)', command.lower())
+            if read_match and user_id and user_id in self.user_last_emails:
+                email_index = int(read_match.group(1)) - 1  # Convert to 0-based index
+                last_emails = self.user_last_emails[user_id]
+                
+                if 0 <= email_index < len(last_emails):
+                    # User wants to read email at this index
+                    target_email = last_emails[email_index]
+                    email_id = target_email['id']
+                    
+                    logger.info(f"📖 Reading email {email_index + 1}: {email_id}")
+                    
+                    # Determine which tool to use (gmail or icloud)
+                    read_tool = "read_gmail_email"  # Default to gmail
+                    
+                    # Call read tool
+                    result = await self.mcp_client.call_tool(read_tool, email_id=email_id)
+                    
+                    formatted = self._format_result_for_voice(result, {})
+                    return formatted, None
+                else:
+                    return f"Sorry, you only have {len(last_emails)} emails in the list.", None
+            
+            # Normal Groq processing
+            # Build tool descriptions
             tools_desc = "\n".join([
                 f"- {tool.name}: {tool.description}"
                 for tool in self.mcp_client.available_tools
             ])
             
-            # System prompt (same as CLI agent)
+            # System prompt
             system_prompt = f"""You are an email assistant with access to these MCP tools:
 
 {tools_desc}
@@ -207,13 +228,9 @@ User: "show me promotions"
 User: "find emails from john"
 {{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john category:primary", "max_results": 5}}, "message": "Searching..."}}
 
-User: "read my latest email" or "read the first one"
-Step 1: {{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 1, "query": "category:primary"}}, "message": "Getting your latest email..."}}
-Step 2: Use the email ID from step 1 to call read_gmail_email
-
 Always respond with valid JSON only."""
 
-            # Call Groq to decide what to do
+            # Call Groq
             response = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
@@ -242,19 +259,26 @@ Always respond with valid JSON only."""
                     
                     # Format result for voice response
                     result_text = self._format_result_for_voice(tool_result, decision)
-                    return result_text
+                    
+                    # Return email list if this was a list command
+                    if isinstance(tool_result, list) and len(tool_result) > 0:
+                        return result_text, tool_result  # Return both text and list
+                    else:
+                        return result_text, None  # Just text, no list
                 
                 else:
                     # Just respond with message
-                    return decision.get("message", assistant_response)
+                    return decision.get("message", assistant_response), None
                     
             except json.JSONDecodeError:
                 # Fallback if not valid JSON
-                return assistant_response
+                return assistant_response, None
                 
         except Exception as e:
             logger.error(f"❌ Error processing command: {e}")
-            return "Sorry, I had trouble processing that command. Please try again."
+            import traceback
+            traceback.print_exc()
+            return "Sorry, I had trouble processing that command. Please try again.", None
     
     def _format_result_for_voice(self, tool_result, decision) -> str:
         """
@@ -265,19 +289,20 @@ Always respond with valid JSON only."""
             if not tool_result:
                 return "You have no emails matching that query."
             
-            # Limit to top 3 for voice (concise)
+            # Limit to top 3 for voice
             emails_text = f"I found {len(tool_result)} emails. Here are the top 3:\n\n"
-
+            
             for i, email in enumerate(tool_result[:3], 1):
                 from_addr = email.get('from', 'Unknown')
                 subject = email.get('subject', 'No subject')
-                email_id = email.get('id', 'N/A')
-    
-                 # Make it voice-friendly
-                emails_text += f"**Email {i}:**\n"
-                emails_text += f"From: {from_addr}\n"
-                emails_text += f"Subject: {subject}\n"
-                emails_text += f"_(To read, say: 'read email {email_id}')_\n\n"
+                
+                emails_text += f"{i}. From {from_addr}\n"
+                emails_text += f"   Subject: {subject}\n\n"
+            
+            # Add instruction at the end
+            emails_text += "💡 Say 'read email number 1' to read the first one."
+            
+            return emails_text
         
         # Handle single email
         elif isinstance(tool_result, dict):
@@ -289,7 +314,7 @@ Always respond with valid JSON only."""
                 return (
                     f"Email from {tool_result.get('from', 'Unknown')}\n"
                     f"Subject: {tool_result.get('subject', 'No subject')}\n\n"
-                    f"{tool_result['body'][:500]}..."  # Truncate long emails
+                    f"{tool_result['body'][:500]}..."
                 )
             
             # Draft result
@@ -317,6 +342,7 @@ Always respond with valid JSON only."""
         Handle voice messages from users.
         """
         user_name = update.effective_user.first_name
+        user_id = update.effective_user.id
         logger.info(f"📥 Received voice message from {user_name}")
         
         # Send "processing" message
@@ -359,8 +385,12 @@ Always respond with valid JSON only."""
                 parse_mode='Markdown'
             )
             
-            # Process through MCP agent
-            response_text = await self.process_email_command(transcribed_text)
+            # Process through MCP agent (pass user_id for context)
+            response_text, email_list = await self.process_email_command(transcribed_text, user_id)
+            
+            # Store email list if returned
+            if email_list:
+                self.user_last_emails[user_id] = email_list
             
             # Send response
             await update.message.reply_text(
@@ -406,8 +436,6 @@ Always respond with valid JSON only."""
     async def connect_mcp_async(self):
         """
         Connect to MCP server asynchronously.
-        
-        This is called once when the bot starts.
         """
         try:
             logger.info("🔌 Connecting to MCP server...")
@@ -453,7 +481,7 @@ Always respond with valid JSON only."""
         
         logger.info("✅ Bot configured, starting polling...")
         
-        # Start polling (this handles the event loop automatically)
+        # Start polling
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
