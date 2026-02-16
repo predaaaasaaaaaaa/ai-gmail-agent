@@ -227,7 +227,6 @@ Always respond with valid JSON only."""
                     logger.info(f"🔧 Calling tool: {decision['tool']}")
                     
                     tool_result = await self.mcp_client.call_tool(
-                        self.mcp_session,
                         decision["tool"],
                         **decision.get("params", {})
                     )
