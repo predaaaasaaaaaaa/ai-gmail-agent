@@ -108,3 +108,37 @@ Send voice messages to control your email:
             help_message,
             parse_mode='Markdown'
         )
+    
+    async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle voice messages from users.
+        
+        Flow:
+        1. Download voice file
+        2. Transcribe with Groq Whisper (next step)
+        3. Process through MCP agent (next step)
+        4. Respond with TTS (next step)
+        """
+        logger.info(f"📥 Received voice message from {updateeffective_user.first_name}")
+        
+        # For now, just acknowledge receipt
+        await update.message.reply_text(
+            "🎤 Voice message received!\n\n"
+            "🔧 Transcription coming in next step...\n\n"
+            f"Duration: {update.message.voice.duration}s
+        )
+    
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle text messages.
+        
+        For now, encourage users to use voice.
+        Later, we can support both text and voice.
+        """
+        await update.message.reply_text(
+            "💬 I see you sent text!\n\n"
+            "I work best with voice messages 🎤\n"
+            "But text support is coming soon!\n\n"
+            "Try sending a voice message instead."
+        )
+    
