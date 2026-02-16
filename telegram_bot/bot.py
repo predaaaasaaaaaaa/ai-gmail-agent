@@ -122,7 +122,7 @@ Send voice messages to control your email:
     async def transcribe_voice(self, voice_file_path: str) -> str:
         """
         Transcribe voice message using Groq Whisper.
-        
+
         Groq Whisper supports:
         - Multiple languages (auto-detect)
         - High accuracy
@@ -152,14 +152,65 @@ Send voice messages to control your email:
         """
         Handle voice messages from users.
         """
-        logger.info(f"📥 Received voice message from {update.effective_user.first_name}")
+        user_name = update.effective_user.first_name
+        logger.info(f"📥 Received voice message from {user_name}")
         
-        # For now, just acknowledge receipt
-        await update.message.reply_text(
-            "🎤 Voice message received!\n\n"
-            "🔧 Transcription coming in next step...\n\n"
-            f"Duration: {update.message.voice.duration}s"
+        # Send "processing" message
+        processing_msg = await update.message.reply_text(
+            "🎤 Listening to your voice message..."
         )
+        
+        try:
+            # Get voice file
+            voice = update.message.voice
+            voice_file = await context.bot.get_file(voice.file_id)
+            
+            # Create temporary file to store audio
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_file:
+                temp_path = temp_file.name
+            
+            # Download voice message
+            await voice_file.download_to_drive(temp_path)
+            logger.info(f"📥 Downloaded voice to: {temp_path}")
+            
+            # Update status
+            await processing_msg.edit_text("🔄 Transcribing your message...")
+            
+            # Transcribe with Groq Whisper
+            transcribed_text = await self.transcribe_voice(temp_path)
+            
+            # Clean up temp file
+            os.unlink(temp_path)
+            
+            if transcribed_text:
+                logger.info(f"📝 Transcribed: {transcribed_text}")
+                
+                # Show user what was heard
+                await processing_msg.edit_text(
+                    f"✅ **I heard:**\n\n"
+                    f"_{transcribed_text}_\n\n"
+                    f"🔧 Processing your request...",
+                    parse_mode='Markdown'
+                )
+            
+                # For now, just echo back
+                await update.message.reply_text(
+                    f"📝 You said: _{transcribed_text}_\n\n"
+                    f"⚙️ Email processing coming in Phase 3!",
+                    parse_mode='Markdown'
+                )
+            else:
+                await processing_msg.edit_text(
+                    "❌ Sorry, I couldn't transcribe your message.\n"
+                    "Please try again with clearer audio."
+                )
+                
+        except Exception as e:
+            logger.error(f"❌ Error handling voice: {e}")
+            await processing_msg.edit_text(
+                "❌ Oops! Something went wrong processing your voice message.\n"
+                "Please try again."
+            )
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
