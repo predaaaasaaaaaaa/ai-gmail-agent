@@ -185,7 +185,9 @@ Send voice messages to control your email:
 IMPORTANT INSTRUCTIONS:
 1. For draft replies: Use draft_gmail_reply or draft_icloud_reply tools.
 2. For searches: Use search_gmail with Gmail query syntax.
-3. Always be helpful and professional.
+3. When user says "check gmail", use query "category:primary" to get main inbox (not promotions).
+4. Gmail categories: category:primary, category:social, category:promotions, category:updates
+5. Always be helpful and professional.
 
 When the user asks you to do something, respond with a JSON object:
 {{
@@ -197,10 +199,13 @@ When the user asks you to do something, respond with a JSON object:
 
 Examples:
 User: "check my gmail"
-{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 5}}, "message": "Fetching your Gmail..."}}
+{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 5, "query": "category:primary"}}, "message": "Fetching your Gmail..."}}
+
+User: "show me promotions"
+{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 5, "query": "category:promotions"}}, "message": "Fetching promotions..."}}
 
 User: "find emails from john"
-{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john", "max_results": 5}}, "message": "Searching..."}}
+{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john category:primary", "max_results": 5}}, "message": "Searching..."}}
 
 Always respond with valid JSON only."""
 
