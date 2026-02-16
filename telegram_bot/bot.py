@@ -142,3 +142,15 @@ Send voice messages to control your email:
             "Try sending a voice message instead."
         )
     
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle errors.
+        """
+        logger.error(f"❌ Error: {context.error}")
+        
+        if update and update.message:
+            await update.message.reply_text(
+                "❌ Oops! Something went wrong.\n"
+                "Please try again or contact support."
+            )
+    
