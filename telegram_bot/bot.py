@@ -77,3 +77,34 @@ Try sending me a voice message now! 🎙️
             welcome_message,
             parse_mode='Markdown'
         )
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /help command.
+        """
+        help_message = """
+📖 **Help - Voice Commands**
+
+Send voice messages to control your email:
+
+**Reading Emails:**
+🎤 "Check my Gmail"
+🎤 "Show my iCloud emails"
+🎤 "Read my last email"
+
+**Searching:**
+🎤 "Find emails from john@example.com"
+🎤 "Search for emails about meetings"
+🎤 "Show me unread emails"
+
+**Sending:**
+🎤 "Send an email to john@example.com saying hello"
+🎤 "Draft a reply to Sarah's email"
+
+**Need help?** Just ask in a voice message!
+        """
+        
+        await update.message.reply_text(
+            help_message,
+            parse_mode='Markdown'
+        )
