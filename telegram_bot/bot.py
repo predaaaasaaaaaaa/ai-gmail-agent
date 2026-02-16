@@ -349,6 +349,21 @@ Always respond with valid JSON only."""
 
         # Fallback
         return str(tool_result)
+    
+    def _escape_markdown(self, text: str) -> str:
+        """
+        Escape special characters for Telegram Markdown.
+       """
+        if not text:
+            return text
+    
+            # Escape special Markdown characters
+            special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
+    
+        for char in special_chars:
+            text = text.replace(char, '\\' + char)
+    
+        return text
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
