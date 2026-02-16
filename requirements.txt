@@ -4,3 +4,8 @@ google-auth-httplib2>=0.1.0
 google-api-python-client>=2.0.0
 groq>=0.4.0
 python-dotenv>=1.0.0
+
+# V3 - Telegram Voice Bot
+python-telegram-bot>=20.0
+openai>=1.0.0
+pydub>=0.25.1
