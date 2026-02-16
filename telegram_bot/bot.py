@@ -292,6 +292,21 @@ Always respond with valid JSON only."""
             traceback.print_exc()
             return "Sorry, I had trouble processing that command. Please try again.", None
 
+    def _escape_markdown(self, text: str) -> str:
+        """
+        Escape special characters for Telegram Markdown.
+        """
+        if not text:
+            return text
+        
+        # Escape special Markdown characters
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
+        
+        for char in special_chars:
+            text = text.replace(char, '\\' + char)
+        
+        return text
+
     def _format_result_for_voice(self, tool_result, decision) -> str:
         """
         Format tool results in a voice-friendly way.
@@ -299,71 +314,65 @@ Always respond with valid JSON only."""
         # Handle list of emails
         if isinstance(tool_result, list):
             if not tool_result:
-                return "You have no emails matching that query."
+                return "You have no emails matching that query\\."
 
             # Show up to 10 emails
             num_to_show = min(len(tool_result), 10)
-            emails_text = f"I found {len(tool_result)} emails. Here are the top {num_to_show}:\n\n"
+            emails_text = f"I found {len(tool_result)} emails\\. Here are the top {num_to_show}:\n\n"
 
             for i, email in enumerate(tool_result[:num_to_show], 1):
-                from_addr = email.get("from", "Unknown")
-                subject = email.get("subject", "No subject")
+                from_addr = self._escape_markdown(email.get("from", "Unknown"))
+                subject = self._escape_markdown(email.get("subject", "No subject"))
 
-                emails_text += f"{i}. From {from_addr}\n"
+                emails_text += f"{i}\\. From {from_addr}\n"
                 emails_text += f"   Subject: {subject}\n\n"
 
             # Add instruction at the end
-            emails_text += "💡 Say 'read email number 1' to read the first one."
+            emails_text += "💡 Say 'read email number 1' to read the first one\\."
 
             return emails_text
 
         # Handle single email
         elif isinstance(tool_result, dict):
             if "error" in tool_result:
-                return f"Error: {tool_result['error']}"
+                error_msg = self._escape_markdown(str(tool_result["error"]))
+                return f"Error: {error_msg}"
 
             # Email read result
             if "body" in tool_result:
+                from_addr = self._escape_markdown(tool_result.get('from', 'Unknown'))
+                subject = self._escape_markdown(tool_result.get('subject', 'No subject'))
+                body = self._escape_markdown(tool_result['body'][:500])
+                
                 return (
-                    f"Email from {tool_result.get('from', 'Unknown')}\n"
-                    f"Subject: {tool_result.get('subject', 'No subject')}\n\n"
-                    f"{tool_result['body'][:500]}..."
+                    f"Email from {from_addr}\n"
+                    f"Subject: {subject}\n\n"
+                    f"{body}\\.\\.\\."
                 )
 
             # Draft result
             if tool_result.get("status") == "draft_created":
+                to = self._escape_markdown(tool_result['to'])
+                subject = self._escape_markdown(tool_result['subject'])
+                body = self._escape_markdown(tool_result['body'])
+                
                 return (
                     f"📧 Draft created:\n\n"
-                    f"To: {tool_result['to']}\n"
-                    f"Subject: {tool_result['subject']}\n\n"
-                    f"{tool_result['body']}\n\n"
-                    f"Should I send this? Reply 'yes' or 'no'."
+                    f"To: {to}\n"
+                    f"Subject: {subject}\n\n"
+                    f"{body}\n\n"
+                    f"Should I send this? Reply 'yes' or 'no'\\."
                 )
 
             # Send result
             if tool_result.get("status") == "sent":
-                return f"✅ Email sent successfully!"
+                return f"✅ Email sent successfully\\!"
 
             # Generic dict
-            return str(tool_result)
+            return self._escape_markdown(str(tool_result))
 
         # Fallback
-        return str(tool_result)
-    
-    def _escape_markdown(self, text: str) -> str:
-        """
-        Escape special characters for Telegram Markdown.
-       """
-        if not text:
-            return text
-    
-            # Escape special Markdown characters
-            special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
-    
-        for char in special_chars:
-            text = text.replace(char, '\\' + char)
-    
-        return text
+        return self._escape_markdown(str(tool_result))
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
