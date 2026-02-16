@@ -207,6 +207,10 @@ User: "show me promotions"
 User: "find emails from john"
 {{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john category:primary", "max_results": 5}}, "message": "Searching..."}}
 
+User: "read my latest email" or "read the first one"
+Step 1: {{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 1, "query": "category:primary"}}, "message": "Getting your latest email..."}}
+Step 2: Use the email ID from step 1 to call read_gmail_email
+
 Always respond with valid JSON only."""
 
             # Call Groq to decide what to do
@@ -255,18 +259,6 @@ Always respond with valid JSON only."""
     def _format_result_for_voice(self, tool_result, decision) -> str:
         """
         Format tool results in a voice-friendly way.
-        
-        Voice responses should be:
-        - Concise (people don't like long voice messages)
-        - Natural language (not JSON)
-        - Action-oriented
-        
-        Args:
-            tool_result: Result from MCP tool
-            decision: The decision made by Groq
-        
-        Returns:
-            Formatted text suitable for voice
         """
         # Handle list of emails
         if isinstance(tool_result, list):
@@ -275,16 +267,17 @@ Always respond with valid JSON only."""
             
             # Limit to top 3 for voice (concise)
             emails_text = f"I found {len(tool_result)} emails. Here are the top 3:\n\n"
-            
+
             for i, email in enumerate(tool_result[:3], 1):
                 from_addr = email.get('from', 'Unknown')
                 subject = email.get('subject', 'No subject')
-                emails_text += f"{i}. From {from_addr}\n   Subject: {subject}\n\n"
-            
-            if len(tool_result) > 3:
-                emails_text += f"...and {len(tool_result) - 3} more."
-            
-            return emails_text
+                email_id = email.get('id', 'N/A')
+    
+                 # Make it voice-friendly
+                emails_text += f"**Email {i}:**\n"
+                emails_text += f"From: {from_addr}\n"
+                emails_text += f"Subject: {subject}\n"
+                emails_text += f"_(To read, say: 'read email {email_id}')_\n\n"
         
         # Handle single email
         elif isinstance(tool_result, dict):
