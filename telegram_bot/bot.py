@@ -7,7 +7,6 @@ This bot:
 3. Processes commands through MCP email agent
 4. Responds with text
 """
-
 import os
 import logging
 import tempfile
@@ -51,41 +50,41 @@ class EmailBot:
 
         self.groq_client = Groq(api_key=self.groq_api_key)
         self.mcp_client = None
-        self.mcp_session = None
 
         # Per-user context memory
-        # {user_id: {"last_emails": [...], "last_read_email": {...}}}
+        # {
+        #   user_id: {
+        #     "email_list": [...],           # Last fetched list
+        #     "read_emails": {               # All emails read this session
+        #       "1": {email_data},           # Key = number from list
+        #       "2": {email_data},
+        #     },
+        #     "pending_draft": None,         # Draft waiting to be sent
+        #     "last_action_email_num": None, # Last email number user interacted with
+        #   }
+        # }
         self.user_context = {}
 
         logger.info("✅ Email Bot initialized")
 
-    def _get_user_context(self, user_id: int) -> dict:
+    def _get_ctx(self, user_id: int) -> dict:
         """Get or create user context."""
         if user_id not in self.user_context:
             self.user_context[user_id] = {
-                "last_emails": [],
-                "last_read_email": None,
+                "email_list": [],
+                "read_emails": {},
+                "pending_draft": None,
+                "last_action_email_num": None,
             }
         return self.user_context[user_id]
 
     def _strip_html(self, text: str) -> str:
-        """
-        Strip HTML tags from email body.
-        Some emails are HTML formatted - we need plain text.
-        """
+        """Strip HTML tags from email body."""
         if not text:
             return text
-
-        # Remove HTML tags
         clean = re.sub(r'<[^>]+>', ' ', text)
-
-        # Decode HTML entities (&amp; &lt; etc.)
         clean = html.unescape(clean)
-
-        # Remove excessive whitespace
         clean = re.sub(r'\s+', ' ', clean).strip()
-
-        # Limit length
         return clean[:800]
 
     def _word_to_number(self, word: str) -> int:
@@ -98,6 +97,30 @@ class EmailBot:
         }
         return word_to_num.get(word.lower())
 
+    def _extract_email_number(self, command: str) -> int:
+        """
+        Extract email number from command.
+        """
+        command_lower = command.lower()
+
+        # Try digit first: "email 1", "email number 1", "number 1"
+        digit_match = re.search(
+            r'(?:email\s+)?(?:number\s+)?(\d+)',
+            command_lower
+        )
+        if digit_match:
+            return int(digit_match.group(1))
+
+        # Try word: "email one", "email number two"
+        word_match = re.search(
+            r'(?:email\s+)?(?:number\s+)?(\w+)',
+            command_lower
+        )
+        if word_match:
+            return self._word_to_number(word_match.group(1))
+
+        return None
+
     def _format_email_list(self, emails: list) -> str:
         """Format email list as plain text."""
         if not emails:
@@ -109,29 +132,22 @@ class EmailBot:
         for i, email in enumerate(emails[:num_to_show], 1):
             from_addr = email.get("from", "Unknown")
             subject = email.get("subject", "No subject")
-            # Clean up long from addresses
             if len(from_addr) > 40:
                 from_addr = from_addr[:40] + "..."
             text += f"{i}. From: {from_addr}\n"
             text += f"   Subject: {subject}\n\n"
 
-        text += "Say 'read email number 1' to read the first one."
+        text += "Say 'read email number 1' to read any email."
         return text
 
     def _format_email_content(self, email_data: dict) -> str:
         """Format single email content as plain text."""
-        if not email_data:
-            return "Could not read email."
-
-        if "error" in email_data:
-            return f"Error reading email: {email_data['error']}"
+        if not email_data or "error" in email_data:
+            return f"Error reading email: {email_data.get('error', 'Unknown error')}"
 
         from_addr = email_data.get('from', 'Unknown')
         subject = email_data.get('subject', 'No subject')
-        body = email_data.get('body', 'No content')
-
-        # Strip HTML if present
-        body = self._strip_html(body)
+        body = self._strip_html(email_data.get('body', 'No content'))
 
         return (
             f"From: {from_addr}\n"
@@ -139,42 +155,370 @@ class EmailBot:
             f"{body}"
         )
 
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        welcome_message = (
-            "🤖 AI Email Agent - Voice Edition\n\n"
-            "Welcome! I help you manage emails with voice.\n\n"
-            "HOW TO USE:\n"
-            "1. Send a voice message\n"
-            "2. I'll transcribe and process it\n"
-            "3. I'll respond with text\n\n"
-            "EXAMPLE COMMANDS:\n"
-            "🎤 'Check my Gmail'\n"
-            "🎤 'Read email number 1'\n"
-            "🎤 'Draft a reply'\n"
-            "🎤 'Send reply'\n\n"
-            "Type /help for more commands."
+    def _parse_recipient(self, from_header: str) -> str:
+        """Extract email address from From header."""
+        email_match = re.search(r'<(.+?)>', from_header)
+        if email_match:
+            return email_match.group(1)
+        # Check if it looks like a plain email
+        if '@' in from_header:
+            return from_header.strip()
+        return from_header.strip()
+
+    async def _generate_reply_body(
+        self,
+        original_from: str,
+        original_subject: str,
+        original_body: str,
+        reply_hint: str = ""
+    ) -> str:
+        """Generate professional reply body using Groq."""
+        prompt = f"""Write a professional email reply.
+
+Original email:
+From: {original_from}
+Subject: {original_subject}
+Body: {original_body[:500]}
+
+{f'User wants to reply saying: {reply_hint}' if reply_hint else 'Write a polite acknowledgment reply.'}
+
+Write ONLY the email body. No subject, no To/From headers.
+Keep it professional, concise and friendly.
+End with: Best regards"""
+
+        response = self.groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=500,
         )
-        await update.message.reply_text(welcome_message)
+        return response.choices[0].message.content.strip()
+
+    async def process_email_command(self, command: str, user_id: int = None):
+        """
+        Process email command through MCP agent.
+        Returns: Tuple of (response_text, email_list or None)
+        """
+        try:
+            logger.info(f"🧠 Processing: {command}")
+            ctx = self._get_ctx(user_id)
+            command_lower = command.lower()
+
+            # ─────────────────────────────────────────
+            # 1. HANDLE "send reply" / "yes send it"
+            # ─────────────────────────────────────────
+            send_triggers = ['send reply', 'send it', 'yes send', 'send this', 'send the reply', 'send that']
+            is_send_reply = any(trigger in command_lower for trigger in send_triggers)
+
+            if is_send_reply and ctx["pending_draft"]:
+                draft = ctx["pending_draft"]
+                account = draft.get("account", "gmail")
+                send_tool = "send_icloud_email" if account == "icloud" else "send_gmail_email"
+
+                logger.info(f"📤 Sending reply via {send_tool} to {draft['to']}")
+
+                result = await self.mcp_client.call_tool(
+                    send_tool,
+                    to=draft["to"],
+                    subject=draft["subject"],
+                    body=draft["body"]
+                )
+
+                # Clear pending draft after sending
+                ctx["pending_draft"] = None
+
+                if isinstance(result, dict) and "error" in result:
+                    return f"Failed to send: {result['error']}", None
+
+                return f"✅ Reply sent to {draft['to']}!", None
+
+            # ─────────────────────────────────────────
+            # 2. HANDLE "cancel draft"
+            # ─────────────────────────────────────────
+            if 'cancel' in command_lower and ctx["pending_draft"]:
+                ctx["pending_draft"] = None
+                return "❌ Draft cancelled.", None
+
+            # ─────────────────────────────────────────
+            # 3. HANDLE "read email number X"
+            # ─────────────────────────────────────────
+            is_read_command = 'read' in command_lower and not any(
+                w in command_lower for w in ['draft', 'reply', 'respond', 'send']
+            )
+
+            if is_read_command and ctx["email_list"]:
+                email_number = self._extract_email_number(
+                    re.sub(r'read\s+', '', command_lower, count=1)
+                )
+
+                if email_number:
+                    email_index = email_number - 1
+
+                    if 0 <= email_index < len(ctx["email_list"]):
+                        target = ctx["email_list"][email_index]
+                        email_id = target["id"]
+
+                        read_tool = "read_icloud_email" if email_id.isdigit() else "read_gmail_email"
+                        account = "icloud" if email_id.isdigit() else "gmail"
+
+                        logger.info(f"📖 Reading email {email_number} ({email_id})")
+
+                        result = await self.mcp_client.call_tool(read_tool, email_id=email_id)
+
+                        if isinstance(result, dict) and "error" not in result:
+                            # Store read email with its NUMBER as key
+                            result["id"] = email_id
+                            result["account"] = account
+                            result["list_number"] = email_number
+                            ctx["read_emails"][str(email_number)] = result
+                            ctx["last_action_email_num"] = str(email_number)
+                            logger.info(f"💾 Stored email #{email_number}: {result.get('subject', '?')}")
+
+                        return self._format_email_content(result), None
+                    else:
+                        return f"Sorry, only {len(ctx['email_list'])} emails in list.", None
+
+            # ─────────────────────────────────────────
+            # 4. HANDLE "draft reply for email X" / "draft reply"
+            # ─────────────────────────────────────────
+            is_draft_command = any(
+                w in command_lower for w in ['draft', 'reply to', 'respond to', 'write back', 'write a reply']
+            )
+
+            if is_draft_command:
+                # Check if user specified which email number to reply to
+                email_number = None
+
+                # Try to find "for email X" or "to email X" or "email number X"
+                for_match = re.search(
+                    r'(?:for|to)\s+(?:email\s+)?(?:number\s+)?(\d+|\w+)',
+                    command_lower
+                )
+                if for_match:
+                    num_str = for_match.group(1)
+                    if num_str.isdigit():
+                        email_number = int(num_str)
+                    else:
+                        email_number = self._word_to_number(num_str)
+
+                # If no number found, use last interacted email
+                if not email_number:
+                    last_num = ctx["last_action_email_num"]
+                    if last_num:
+                        email_number = int(last_num)
+
+                logger.info(f"📝 Draft requested for email #{email_number}")
+
+                # Get the email from context
+                target_email = None
+                if email_number and str(email_number) in ctx["read_emails"]:
+                    target_email = ctx["read_emails"][str(email_number)]
+                elif ctx["last_action_email_num"] and ctx["last_action_email_num"] in ctx["read_emails"]:
+                    target_email = ctx["read_emails"][ctx["last_action_email_num"]]
+
+                if not target_email:
+                    return (
+                        "I don't have that email in context.\n"
+                        "Please read the email first by saying 'read email number X'.",
+                        None
+                    )
+
+                from_addr = target_email.get("from", "")
+                subject = target_email.get("subject", "")
+                body = target_email.get("body", "")
+                account = target_email.get("account", "gmail")
+
+                # Extract reply hint from command
+                reply_hint_match = re.search(
+                    r'(?:saying|that|message|reply\s+with|respond\s+with)\s+(.+)',
+                    command_lower
+                )
+                reply_hint = reply_hint_match.group(1) if reply_hint_match else ""
+
+                recipient = self._parse_recipient(from_addr)
+                reply_subject = subject if subject.lower().startswith('re:') else f"Re: {subject}"
+
+                # Generate reply using AI
+                reply_body = await self._generate_reply_body(
+                    original_from=from_addr,
+                    original_subject=subject,
+                    original_body=self._strip_html(body),
+                    reply_hint=reply_hint
+                )
+
+                # Store pending draft with account info
+                ctx["pending_draft"] = {
+                    "to": recipient,
+                    "subject": reply_subject,
+                    "body": reply_body,
+                    "account": account,
+                    "for_email_num": email_number
+                }
+
+                logger.info(f"💾 Draft created for email #{email_number} via {account}")
+
+                return (
+                    f"📧 DRAFT REPLY (for email #{email_number}):\n\n"
+                    f"To: {recipient}\n"
+                    f"Subject: {reply_subject}\n\n"
+                    f"{reply_body}\n\n"
+                    f"Say 'send reply' to send or 'cancel' to cancel."
+                ), None
+
+            # ─────────────────────────────────────────
+            # 5. NORMAL GROQ PROCESSING
+            # ─────────────────────────────────────────
+            tools_desc = "\n".join([
+                f"- {tool.name}: {tool.description}"
+                for tool in self.mcp_client.available_tools
+            ])
+
+            # Build context summary for Groq
+            context_summary = ""
+            if ctx["email_list"]:
+                context_summary += f"User has {len(ctx['email_list'])} emails loaded in memory.\n"
+            if ctx["read_emails"]:
+                read_list = [
+                    f"Email #{num}: {data.get('subject', '?')} from {data.get('from', '?')}"
+                    for num, data in ctx["read_emails"].items()
+                ]
+                context_summary += "Read emails:\n" + "\n".join(read_list) + "\n"
+            if ctx["pending_draft"]:
+                context_summary += f"Pending draft to: {ctx['pending_draft']['to']}\n"
+
+            system_prompt = f"""You are an email assistant with access to these MCP tools:
+
+{tools_desc}
+
+CURRENT SESSION CONTEXT:
+{context_summary if context_summary else 'No emails loaded yet.'}
+
+IMPORTANT RULES:
+1. "read email X", "draft reply", "send reply" are handled by the system - respond with action "respond".
+2. "check gmail" -> list_gmail_emails with query "category:primary" max_results 10.
+3. "check icloud" -> list_icloud_emails max_results 10.
+4. "find emails from NAME" -> search_gmail with from:NAME.
+5. To send a NEW email (not a reply) to an email address -> send_gmail_email.
+6. Always return valid JSON only.
+
+Response format:
+{{
+    "action": "call_tool" or "respond",
+    "tool": "tool_name",
+    "params": {{}},
+    "message": "message"
+}}
+
+Examples:
+User: "check my gmail"
+{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10, "query": "category:primary"}}, "message": "Fetching Gmail..."}}
+
+User: "check icloud"
+{{"action": "call_tool", "tool": "list_icloud_emails", "params": {{"max_results": 10}}, "message": "Fetching iCloud..."}}
+
+User: "find emails from Nike"
+{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:Nike", "max_results": 5}}, "message": "Searching..."}}
+
+User: "send email to john@example.com saying hello there"
+{{"action": "call_tool", "tool": "send_gmail_email", "params": {{"to": "john@example.com", "subject": "Hello", "body": "hello there"}}, "message": "Sending..."}}
+
+User: "read email 1" or "draft reply" or "send reply"
+{{"action": "respond", "message": "On it!"}}
+
+Always respond with valid JSON only."""
+
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": command},
+                ],
+                temperature=0.3,
+                max_tokens=1000,
+            )
+
+            assistant_response = response.choices[0].message.content
+            logger.info(f"🤖 Groq: {assistant_response}")
+
+            try:
+                decision = json.loads(assistant_response)
+
+                if decision.get("action") == "call_tool":
+                    logger.info(f"🔧 Tool: {decision['tool']}")
+
+                    tool_result = await self.mcp_client.call_tool(
+                        decision["tool"], **decision.get("params", {})
+                    )
+
+                    # Email list result
+                    if isinstance(tool_result, list):
+                        if len(tool_result) > 0:
+                            # Store in context
+                            ctx["email_list"] = tool_result
+                            # Clear read emails when new list is loaded
+                            ctx["read_emails"] = {}
+                            ctx["last_action_email_num"] = None
+                            ctx["pending_draft"] = None
+                            logger.info(f"💾 Stored {len(tool_result)} emails in context")
+                            return self._format_email_list(tool_result), tool_result
+                        else:
+                            return "No emails found.", None
+
+                    # Single result
+                    if isinstance(tool_result, dict):
+                        if "error" in tool_result:
+                            return f"Error: {tool_result['error']}", None
+                        if tool_result.get("status") == "sent":
+                            return "✅ Email sent successfully!", None
+                        return str(tool_result), None
+
+                    return str(tool_result), None
+
+                else:
+                    return decision.get("message", "Done!"), None
+
+            except json.JSONDecodeError:
+                return assistant_response, None
+
+        except Exception as e:
+            logger.error(f"❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return "Sorry, something went wrong. Please try again.", None
+
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(
+            "🤖 AI Email Agent - Voice Edition\n\n"
+            "HOW TO USE:\n"
+            "1. Say 'check my Gmail' or 'check my iCloud'\n"
+            "2. Say 'read email number 1' to read any email\n"
+            "3. Say 'draft a reply' to draft a response\n"
+            "4. Say 'send reply' to send the draft\n\n"
+            "Type /help for all commands."
+        )
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        help_message = (
-            "📖 VOICE COMMANDS HELP\n\n"
-            "READING:\n"
+        await update.message.reply_text(
+            "📖 VOICE COMMANDS:\n\n"
+            "LISTING:\n"
             "🎤 'Check my Gmail'\n"
             "🎤 'Check my iCloud'\n"
-            "🎤 'Read email number 1'\n\n"
+            "🎤 'Show my last 10 emails'\n\n"
+            "READING:\n"
+            "🎤 'Read email number 1'\n"
+            "🎤 'Read email number two'\n\n"
+            "DRAFTING:\n"
+            "🎤 'Draft a reply' (for last read email)\n"
+            "🎤 'Draft a reply for email 2'\n"
+            "🎤 'Draft a reply saying I will attend'\n\n"
+            "SENDING:\n"
+            "🎤 'Send reply'\n"
+            "🎤 'Cancel' (to cancel draft)\n\n"
             "SEARCHING:\n"
             "🎤 'Find emails from John'\n"
             "🎤 'Search for emails about meetings'\n"
-            "🎤 'Show unread emails'\n\n"
-            "REPLYING (after reading an email):\n"
-            "🎤 'Draft a reply'\n"
-            "🎤 'Send reply'\n"
-            "🎤 'Reply saying I will attend'\n\n"
-            "SENDING:\n"
-            "🎤 'Send email to john@example.com saying hello'\n"
+            "🎤 'Show unread emails'\n"
         )
-        await update.message.reply_text(help_message)
 
     async def transcribe_voice(self, voice_file_path: str) -> str:
         """Transcribe voice message using Groq Whisper."""
@@ -192,297 +536,6 @@ class EmailBot:
         except Exception as e:
             logger.error(f"❌ Transcription error: {e}")
             return None
-
-    async def process_email_command(self, command: str, user_id: int = None):
-        """
-        Process email command through MCP agent.
-        
-        Returns:
-            Tuple of (response_text, email_list or None)
-        """
-        try:
-            logger.info(f"🧠 Processing: {command}")
-            ctx = self._get_user_context(user_id)
-
-            # ─────────────────────────────────────────
-            # HANDLE "read email number X" locally
-            # ─────────────────────────────────────────
-            read_match = re.search(r"read\s+(?:email\s+)?(?:number\s+)?(\d+)", command.lower())
-            email_number = None
-
-            if read_match:
-                email_number = int(read_match.group(1))
-            else:
-                word_match = re.search(r"read\s+(?:email\s+)?(?:number\s+)?(\w+)", command.lower())
-                if word_match:
-                    email_number = self._word_to_number(word_match.group(1))
-
-            if email_number and ctx["last_emails"]:
-                email_index = email_number - 1
-                if 0 <= email_index < len(ctx["last_emails"]):
-                    target_email = ctx["last_emails"][email_index]
-                    email_id = target_email["id"]
-
-                    logger.info(f"📖 Reading email {email_number}: {email_id}")
-
-                    read_tool = "read_icloud_email" if email_id.isdigit() else "read_gmail_email"
-                    result = await self.mcp_client.call_tool(read_tool, email_id=email_id)
-
-                    # Store as last read email for context
-                    if isinstance(result, dict) and "error" not in result:
-                        ctx["last_read_email"] = result
-                        ctx["last_read_email"]["id"] = email_id
-                        ctx["last_read_email"]["account"] = "icloud" if email_id.isdigit() else "gmail"
-                        logger.info(f"💾 Stored last read email: {result.get('subject', 'Unknown')}")
-
-                    formatted = self._format_email_content(result)
-                    return formatted, None
-                else:
-                    return f"Sorry, you only have {len(ctx['last_emails'])} emails in the list.", None
-
-            # ─────────────────────────────────────────
-            # HANDLE "draft reply" / "send reply" locally
-            # ─────────────────────────────────────────
-            command_lower = command.lower()
-
-            # Check if user wants to draft/send reply to last read email
-            is_draft = any(word in command_lower for word in ['draft', 'reply', 'respond', 'write back'])
-            is_send_reply = any(word in command_lower for word in ['send reply', 'send it', 'yes send'])
-
-            if is_draft and ctx["last_read_email"]:
-                last_email = ctx["last_read_email"]
-                from_addr = last_email.get("from", "")
-                subject = last_email.get("subject", "")
-                body = last_email.get("body", "")
-
-                # Extract reply content from command if provided
-                # e.g. "draft a reply saying I will attend"
-                reply_content_match = re.search(r'(?:saying|that|with|message)\s+(.+)', command_lower)
-                if reply_content_match:
-                    reply_hint = reply_content_match.group(1)
-                else:
-                    reply_hint = ""
-
-                # Parse email address from "From" field
-                email_match = re.search(r'<(.+?)>', from_addr)
-                recipient = email_match.group(1) if email_match else from_addr.strip()
-
-                # Reply subject
-                reply_subject = subject if subject.lower().startswith('re:') else f"Re: {subject}"
-
-                # Generate reply body using Groq
-                reply_body = await self._generate_reply_body(
-                    original_from=from_addr,
-                    original_subject=subject,
-                    original_body=self._strip_html(body),
-                    reply_hint=reply_hint
-                )
-
-                # Store pending draft in context
-                ctx["pending_draft"] = {
-                    "to": recipient,
-                    "subject": reply_subject,
-                    "body": reply_body,
-                    "account": last_email.get("account", "gmail")
-                }
-
-                response = (
-                    f"📧 DRAFT REPLY:\n\n"
-                    f"To: {recipient}\n"
-                    f"Subject: {reply_subject}\n\n"
-                    f"{reply_body}\n\n"
-                    f"Say 'send reply' to send or 'cancel' to cancel."
-                )
-                return response, None
-
-            # Check if user wants to send the pending draft
-            if is_send_reply and ctx.get("pending_draft"):
-                draft = ctx["pending_draft"]
-                account = draft.get("account", "gmail")
-                send_tool = "send_icloud_email" if account == "icloud" else "send_gmail_email"
-
-                result = await self.mcp_client.call_tool(
-                    send_tool,
-                    to=draft["to"],
-                    subject=draft["subject"],
-                    body=draft["body"]
-                )
-
-                # Clear pending draft
-                ctx["pending_draft"] = None
-
-                if isinstance(result, dict) and "error" in result:
-                    return f"Failed to send: {result['error']}", None
-                return f"✅ Reply sent to {draft['to']}!", None
-
-            # Cancel pending draft
-            if 'cancel' in command_lower and ctx.get("pending_draft"):
-                ctx["pending_draft"] = None
-                return "❌ Draft cancelled.", None
-
-            # ─────────────────────────────────────────
-            # NORMAL GROQ PROCESSING
-            # ─────────────────────────────────────────
-            tools_desc = "\n".join([
-                f"- {tool.name}: {tool.description}"
-                for tool in self.mcp_client.available_tools
-            ])
-
-            # Include context in system prompt
-            context_info = ""
-            if ctx["last_read_email"]:
-                context_info = f"""
-CURRENT CONTEXT:
-- Last read email from: {ctx['last_read_email'].get('from', 'Unknown')}
-- Last read email subject: {ctx['last_read_email'].get('subject', 'Unknown')}
-- Account: {ctx['last_read_email'].get('account', 'gmail')}
-"""
-
-            system_prompt = f"""You are an email assistant with access to these MCP tools:
-
-{tools_desc}
-
-{context_info}
-
-IMPORTANT INSTRUCTIONS:
-1. When user says "read email X" where X is a number - respond with action "respond" only (handled by system).
-2. When user says "draft reply" or "send reply" - respond with action "respond" only (handled by system).
-3. When user says "check gmail" - use list_gmail_emails with query "category:primary".
-4. When user says "check icloud" - use list_icloud_emails.
-5. When user wants to send to a NAME (not email address) - use search_gmail to find their email first.
-6. Always respond with valid JSON only.
-
-Respond with:
-{{
-    "action": "call_tool" or "respond",
-    "tool": "tool_name",
-    "params": {{}},
-    "message": "message to user"
-}}
-
-Examples:
-User: "check my gmail"
-{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10, "query": "category:primary"}}, "message": "Fetching Gmail..."}}
-
-User: "check my icloud"
-{{"action": "call_tool", "tool": "list_icloud_emails", "params": {{"max_results": 10}}, "message": "Fetching iCloud..."}}
-
-User: "find emails from Nike"
-{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:Nike", "max_results": 5}}, "message": "Searching for Nike emails..."}}
-
-User: "read email 1" or "draft reply" or "send reply"
-{{"action": "respond", "message": "Handling that for you..."}}
-
-User: "send email to john@example.com saying hello"
-{{"action": "call_tool", "tool": "send_gmail_email", "params": {{"to": "john@example.com", "subject": "Hello", "body": "hello"}}, "message": "Sending email..."}}
-
-Always respond with valid JSON only."""
-
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": command},
-                ],
-                temperature=0.3,
-                max_tokens=1000,
-            )
-
-            assistant_response = response.choices[0].message.content
-            logger.info(f"🤖 Groq response: {assistant_response}")
-
-            try:
-                decision = json.loads(assistant_response)
-
-                if decision.get("action") == "call_tool":
-                    logger.info(f"🔧 Calling tool: {decision['tool']}")
-
-                    tool_result = await self.mcp_client.call_tool(
-                        decision["tool"], **decision.get("params", {})
-                    )
-
-                    # Store email list in context
-                    if isinstance(tool_result, list) and len(tool_result) > 0:
-                        ctx["last_emails"] = tool_result
-                        return self._format_email_list(tool_result), tool_result
-
-                    # Handle single email result
-                    if isinstance(tool_result, dict):
-                        if "error" in tool_result:
-                            return f"Error: {tool_result['error']}", None
-                        if tool_result.get("status") == "sent":
-                            return "✅ Email sent successfully!", None
-                        if tool_result.get("status") == "draft_created":
-                            ctx["pending_draft"] = {
-                                "to": tool_result["to"],
-                                "subject": tool_result["subject"],
-                                "body": tool_result["body"],
-                                "account": "gmail"
-                            }
-                            return (
-                                f"📧 DRAFT REPLY:\n\n"
-                                f"To: {tool_result['to']}\n"
-                                f"Subject: {tool_result['subject']}\n\n"
-                                f"{tool_result['body']}\n\n"
-                                f"Say 'send reply' to send or 'cancel' to cancel."
-                            ), None
-
-                        return str(tool_result), None
-
-                    return str(tool_result), None
-
-                else:
-                    return decision.get("message", assistant_response), None
-
-            except json.JSONDecodeError:
-                return assistant_response, None
-
-        except Exception as e:
-            logger.error(f"❌ Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return "Sorry, something went wrong. Please try again.", None
-
-    async def _generate_reply_body(
-        self,
-        original_from: str,
-        original_subject: str,
-        original_body: str,
-        reply_hint: str = ""
-    ) -> str:
-        """
-        Generate a professional reply body using Groq.
-        
-        Args:
-            original_from: Sender of original email
-            original_subject: Subject of original email
-            original_body: Body of original email
-            reply_hint: User's hint about what to say
-        
-        Returns:
-            Generated reply body text
-        """
-        prompt = f"""Write a professional email reply.
-
-Original email:
-From: {original_from}
-Subject: {original_subject}
-Body: {original_body[:500]}
-
-User wants to reply{f' saying: {reply_hint}' if reply_hint else ''}.
-
-Write ONLY the email body text. No subject line, no "To:", just the body.
-Keep it professional, concise, and friendly.
-Sign off with just "Best regards" on a new line."""
-
-        response = self.groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=500,
-        )
-
-        return response.choices[0].message.content.strip()
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle voice messages from users."""
@@ -514,28 +567,21 @@ Sign off with just "Best regards" on a new line."""
 
             response_text, email_list = await self.process_email_command(transcribed_text, user_id)
 
-            # Update email list in context if returned
-            if email_list:
-                ctx = self._get_user_context(user_id)
-                ctx["last_emails"] = email_list
-
-            # Send response as plain text (NO parse_mode to avoid Markdown issues)
+            # Send as plain text - NO parse_mode
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
-
             await processing_msg.delete()
 
         except Exception as e:
             logger.error(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
-            await processing_msg.edit_text("❌ Something went wrong. Please try again.")
+            await processing_msg.edit_text("❌ Something went wrong. Try again.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages."""
         await update.message.reply_text(
-            "💬 Text received!\n\n"
             "I work best with voice messages 🎤\n"
-            "Try sending a voice message instead."
+            "Try sending a voice message!"
         )
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -550,7 +596,7 @@ Sign off with just "Best regards" on a new line."""
             logger.info("🔌 Connecting to MCP server...")
             self.mcp_client = MCPEmailClient()
             self.mcp_client = await self.mcp_client.__aenter__()
-            logger.info(f"✅ MCP connected - {len(self.mcp_client.available_tools)} tools available")
+            logger.info(f"✅ MCP connected - {len(self.mcp_client.available_tools)} tools")
         except Exception as e:
             logger.error(f"❌ MCP connection failed: {e}")
             import traceback
