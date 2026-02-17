@@ -68,6 +68,34 @@ class EmailBot:
             }
         return self.user_context[user_id]
 
+    def _normalize_command(self, command: str) -> str:
+        """
+        Normalize transcription quirks.
+        Converts spoken numbers to digits for reliable processing.
+        e.g. "read email number two" -> "read email number 2"
+        """
+        number_words = {
+            r'\bone\b': '1', r'\btwo\b': '2', r'\bthree\b': '3',
+            r'\bfour\b': '4', r'\bfive\b': '5', r'\bsix\b': '6',
+            r'\bseven\b': '7', r'\beight\b': '8', r'\bnine\b': '9',
+            r'\bten\b': '10', r'\bfirst\b': '1', r'\bsecond\b': '2',
+            r'\bthird\b': '3', r'\bfourth\b': '4', r'\bfifth\b': '5',
+            r'\bsixth\b': '6', r'\bseventh\b': '7', r'\beighth\b': '8',
+            r'\bninth\b': '9', r'\btenth\b': '10',
+            # Common Whisper mishearings
+            r'\bto\b': '2', r'\btoo\b': '2', r'\btu\b': '2',
+            r'\bfor\b': '4', r'\bate\b': '8',
+        }
+
+        result = command.lower()
+        for pattern, replacement in number_words.items():
+            result = re.sub(pattern, replacement, result)
+
+        if result != command.lower():
+            logger.info(f"🔄 Normalized: '{command}' -> '{result}'")
+
+        return result
+
     def _strip_html(self, text: str) -> str:
         """Strip HTML tags from email body."""
         if not text:
@@ -171,6 +199,9 @@ End with: Best regards"""
         try:
             logger.info(f"🧠 Processing: {command}")
             ctx = self._get_ctx(user_id)
+
+            # Normalize BEFORE anything else
+            command = self._normalize_command(command)
             command_lower = command.lower().strip()
 
             # ─────────────────────────────────────────
@@ -258,14 +289,23 @@ End with: Best regards"""
                 # Multiple emails - need number
                 email_number = None
 
+                # Try digit first
                 digit_match = re.search(r'\b(\d+)\b', command_lower)
                 if digit_match:
                     email_number = int(digit_match.group(1))
                 else:
+                    # Try word numbers - skip non-number words
+                    skip_words = {
+                        'read', 'email', 'number', 'the', 'me', 'please',
+                        'open', 'show', 'get', 'fetch', 'load', 'mail', 'a', 'an'
+                    }
                     for word in command_lower.split():
+                        if word in skip_words:
+                            continue
                         num = self._word_to_number(word)
                         if num:
                             email_number = num
+                            logger.info(f"🔢 Word number detected: '{word}' -> {num}")
                             break
 
                 if email_number:
@@ -304,7 +344,6 @@ End with: Best regards"""
             is_draft = any(t in command_lower for t in draft_triggers)
 
             if is_draft:
-                # Find which email number to draft for
                 target_email_num = None
 
                 explicit_match = re.search(
@@ -315,14 +354,21 @@ End with: Best regards"""
                     target_email_num = int(explicit_match.group(1))
                     logger.info(f"📝 Explicit number: #{target_email_num}")
                 else:
+                    skip_words = {
+                        'draft', 'reply', 'respond', 'write', 'compose',
+                        'email', 'number', 'mail', 'a', 'an', 'the', 'to',
+                        'for', 'this', 'that', 'my', 'me', 'please'
+                    }
                     for word in command_lower.split():
+                        if word in skip_words:
+                            continue
                         num = self._word_to_number(word)
                         if num:
                             target_email_num = num
                             logger.info(f"📝 Word number: #{target_email_num}")
                             break
 
-                # Get email data from context
+                # Get email data
                 target_email_data = None
 
                 if target_email_num and str(target_email_num) in ctx["read_emails"]:
@@ -559,7 +605,7 @@ Examples:
 
         if ctx["pending_draft"]:
             draft = ctx["pending_draft"]
-            msg += f"📝 Pending draft:\n"
+            msg += "📝 Pending draft:\n"
             msg += f"  To: {draft['to']}\n"
             msg += f"  Subject: {draft['subject']}\n"
             msg += f"  Account: {draft['account']}\n"
@@ -582,23 +628,6 @@ Examples:
             "🗑️ Memory cleared!\n\n"
             "Start fresh by saying 'check my Gmail'."
         )
-
-    async def transcribe_voice(self, voice_file_path: str) -> str:
-        """Transcribe voice message using Groq Whisper."""
-        try:
-            logger.info(f"🎤 Transcribing: {voice_file_path}")
-            with open(voice_file_path, "rb") as audio_file:
-                transcription = self.groq_client.audio.transcriptions.create(
-                    file=audio_file,
-                    model="whisper-large-v3",
-                    language="en",
-                    response_format="text",
-                )
-            logger.info(f"✅ Transcription: {transcription}")
-            return transcription
-        except Exception as e:
-            logger.error(f"❌ Transcription error: {e}")
-            return None
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle voice messages from users."""
@@ -642,6 +671,23 @@ Examples:
             import traceback
             traceback.print_exc()
             await processing_msg.edit_text("❌ Something went wrong. Try again.")
+
+    async def transcribe_voice(self, voice_file_path: str) -> str:
+        """Transcribe voice message using Groq Whisper."""
+        try:
+            logger.info(f"🎤 Transcribing: {voice_file_path}")
+            with open(voice_file_path, "rb") as audio_file:
+                transcription = self.groq_client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-large-v3",
+                    language="en",
+                    response_format="text",
+                )
+            logger.info(f"✅ Transcription: {transcription}")
+            return transcription
+        except Exception as e:
+            logger.error(f"❌ Transcription error: {e}")
+            return None
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages - supports both text and voice commands."""
