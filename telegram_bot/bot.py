@@ -120,7 +120,11 @@ class EmailBot:
             text += f"{i}. From: {from_addr}\n"
             text += f"   Subject: {subject}\n\n"
 
-        text += "Say 'read email number 1' to read any email."
+        if len(emails) == 1:
+            text += "Say 'read it' or 'read this email' to read it."
+        else:
+            text += "Say 'read email number 1' to read any email."
+
         return text
 
     def _format_email_content(self, email_data: dict) -> str:
@@ -229,9 +233,29 @@ End with: Best regards"""
             )
 
             if is_read and ctx["email_list"]:
-                email_number = None
 
-                # Find digit number
+                # If only 1 email in list, read it automatically
+                if len(ctx["email_list"]) == 1:
+                    target = ctx["email_list"][0]
+                    email_id = target["id"]
+                    account = "icloud" if email_id.isdigit() else "gmail"
+                    read_tool = "read_icloud_email" if account == "icloud" else "read_gmail_email"
+
+                    logger.info(f"📖 Only 1 email - reading automatically: {email_id}")
+
+                    result = await self.mcp_client.call_tool(read_tool, email_id=email_id)
+
+                    if isinstance(result, dict) and "error" not in result:
+                        result["id"] = email_id
+                        result["account"] = account
+                        result["list_number"] = 1
+                        ctx["read_emails"]["1"] = result
+                        ctx["last_action_email_num"] = "1"
+                        logger.info(f"💾 Auto-stored single email: {result.get('subject')}")
+
+                    return self._format_email_content(result), None
+
+                email_number = None
                 digit_match = re.search(r'\b(\d+)\b', command_lower)
                 if digit_match:
                     email_number = int(digit_match.group(1))
@@ -500,7 +524,7 @@ Examples:
         )
 
     # ─────────────────────────────────────────
-    # SUGGESTION 2: /status command
+    # 2: /status command
     # ─────────────────────────────────────────
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show current bot context/memory for this user."""
