@@ -5,7 +5,7 @@ This bot:
 1. Receives voice messages from users
 2. Transcribes them using Groq Whisper
 3. Processes commands through MCP email agent
-4. Responds with voice (TTS)
+4. Responds with text
 """
 
 import os
@@ -13,6 +13,8 @@ import logging
 import tempfile
 import sys
 import re
+import json
+import html
 from pathlib import Path
 from telegram import Update
 from telegram.ext import (
@@ -25,13 +27,11 @@ from telegram.ext import (
 from dotenv import load_dotenv
 from groq import Groq
 
-sys.path.insert(0, str(Path(__file__).parent.parent))  # Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from agent.mcp_client import MCPEmailClient
 
-# Load environment variables
 load_dotenv()
 
-# Setup logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -39,123 +39,57 @@ logger = logging.getLogger(__name__)
 
 
 class EmailBot:
-    """
-    Telegram bot for voice-controlled email management.
-    """
 
     def __init__(self):
-        """Initialize the bot."""
         self.token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not self.token:
             raise ValueError("TELEGRAM_BOT_TOKEN not found in .env")
 
-        # Initialize Groq for transcription
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         if not self.groq_api_key:
             raise ValueError("GROQ_API_KEY not found in .env")
 
         self.groq_client = Groq(api_key=self.groq_api_key)
-
-        # MCP client
         self.mcp_client = None
         self.mcp_session = None
 
-        # Store last fetched emails per user (for "read email number X")
-        self.user_last_emails = {}
+        # Per-user context memory
+        # {user_id: {"last_emails": [...], "last_read_email": {...}}}
+        self.user_context = {}
 
         logger.info("✅ Email Bot initialized")
 
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def _get_user_context(self, user_id: int) -> dict:
+        """Get or create user context."""
+        if user_id not in self.user_context:
+            self.user_context[user_id] = {
+                "last_emails": [],
+                "last_read_email": None,
+            }
+        return self.user_context[user_id]
+
+    def _strip_html(self, text: str) -> str:
         """
-        Handle /start command.
+        Strip HTML tags from email body.
+        Some emails are HTML formatted - we need plain text.
         """
-        welcome_message = """
-🤖 **AI Email Agent - Voice Edition**
+        if not text:
+            return text
 
-Welcome! I can help you manage your emails using voice messages.
+        # Remove HTML tags
+        clean = re.sub(r'<[^>]+>', ' ', text)
 
-**How to use:**
-1. Send me a voice message
-2. I'll transcribe and process your command
-3. I'll respond with text
+        # Decode HTML entities (&amp; &lt; etc.)
+        clean = html.unescape(clean)
 
-**Example commands:**
-🎤 "Check my Gmail"
-🎤 "Read email number 1"
-🎤 "Find emails from John"
-🎤 "Send an email to john@example.com"
+        # Remove excessive whitespace
+        clean = re.sub(r'\s+', ' ', clean).strip()
 
-**Text commands:**
-/start - Show this message
-/help - Get help
-
-Try sending me a voice message now! 🎙️
-        """
-
-        await update.message.reply_text(welcome_message, parse_mode="Markdown")
-
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle /help command.
-        """
-        help_message = """
-📖 **Help - Voice Commands**
-
-Send voice messages to control your email:
-
-**Reading Emails:**
-🎤 "Check my Gmail"
-🎤 "Read email number 1"
-🎤 "Read my last email"
-
-**Searching:**
-🎤 "Find emails from john@example.com"
-🎤 "Search for emails about meetings"
-🎤 "Show me unread emails"
-
-**Sending:**
-🎤 "Send an email to john@example.com saying hello"
-🎤 "Draft a reply to Sarah's email"
-
-**Need help?** Just ask in a voice message!
-        """
-
-        await update.message.reply_text(help_message, parse_mode="Markdown")
-
-    async def transcribe_voice(self, voice_file_path: str) -> str:
-        """
-        Transcribe voice message using Groq Whisper.
-        """
-        try:
-            logger.info(f"🎤 Transcribing audio file: {voice_file_path}")
-
-            # Open audio file
-            with open(voice_file_path, "rb") as audio_file:
-                # Call Groq Whisper API
-                transcription = self.groq_client.audio.transcriptions.create(
-                    file=audio_file,
-                    model="whisper-large-v3",
-                    language="en",
-                    response_format="text",
-                )
-
-            logger.info(f"✅ Transcription: {transcription}")
-            return transcription
-
-        except Exception as e:
-            logger.error(f"❌ Transcription error: {e}")
-            return None
+        # Limit length
+        return clean[:800]
 
     def _word_to_number(self, word: str) -> int:
-        """
-        Convert word numbers to integers.
-        
-        Args:
-            word: Number as word (e.g., "one", "two", "three")
-        
-        Returns:
-            Integer or None if not a valid number word
-        """
+        """Convert word numbers to integers."""
         word_to_num = {
             'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
             'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
@@ -164,117 +98,286 @@ Send voice messages to control your email:
         }
         return word_to_num.get(word.lower())
 
+    def _format_email_list(self, emails: list) -> str:
+        """Format email list as plain text."""
+        if not emails:
+            return "You have no emails matching that query."
+
+        num_to_show = min(len(emails), 10)
+        text = f"Found {len(emails)} emails. Showing top {num_to_show}:\n\n"
+
+        for i, email in enumerate(emails[:num_to_show], 1):
+            from_addr = email.get("from", "Unknown")
+            subject = email.get("subject", "No subject")
+            # Clean up long from addresses
+            if len(from_addr) > 40:
+                from_addr = from_addr[:40] + "..."
+            text += f"{i}. From: {from_addr}\n"
+            text += f"   Subject: {subject}\n\n"
+
+        text += "Say 'read email number 1' to read the first one."
+        return text
+
+    def _format_email_content(self, email_data: dict) -> str:
+        """Format single email content as plain text."""
+        if not email_data:
+            return "Could not read email."
+
+        if "error" in email_data:
+            return f"Error reading email: {email_data['error']}"
+
+        from_addr = email_data.get('from', 'Unknown')
+        subject = email_data.get('subject', 'No subject')
+        body = email_data.get('body', 'No content')
+
+        # Strip HTML if present
+        body = self._strip_html(body)
+
+        return (
+            f"From: {from_addr}\n"
+            f"Subject: {subject}\n\n"
+            f"{body}"
+        )
+
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        welcome_message = (
+            "🤖 AI Email Agent - Voice Edition\n\n"
+            "Welcome! I help you manage emails with voice.\n\n"
+            "HOW TO USE:\n"
+            "1. Send a voice message\n"
+            "2. I'll transcribe and process it\n"
+            "3. I'll respond with text\n\n"
+            "EXAMPLE COMMANDS:\n"
+            "🎤 'Check my Gmail'\n"
+            "🎤 'Read email number 1'\n"
+            "🎤 'Draft a reply'\n"
+            "🎤 'Send reply'\n\n"
+            "Type /help for more commands."
+        )
+        await update.message.reply_text(welcome_message)
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        help_message = (
+            "📖 VOICE COMMANDS HELP\n\n"
+            "READING:\n"
+            "🎤 'Check my Gmail'\n"
+            "🎤 'Check my iCloud'\n"
+            "🎤 'Read email number 1'\n\n"
+            "SEARCHING:\n"
+            "🎤 'Find emails from John'\n"
+            "🎤 'Search for emails about meetings'\n"
+            "🎤 'Show unread emails'\n\n"
+            "REPLYING (after reading an email):\n"
+            "🎤 'Draft a reply'\n"
+            "🎤 'Send reply'\n"
+            "🎤 'Reply saying I will attend'\n\n"
+            "SENDING:\n"
+            "🎤 'Send email to john@example.com saying hello'\n"
+        )
+        await update.message.reply_text(help_message)
+
+    async def transcribe_voice(self, voice_file_path: str) -> str:
+        """Transcribe voice message using Groq Whisper."""
+        try:
+            logger.info(f"🎤 Transcribing: {voice_file_path}")
+            with open(voice_file_path, "rb") as audio_file:
+                transcription = self.groq_client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-large-v3",
+                    language="en",
+                    response_format="text",
+                )
+            logger.info(f"✅ Transcription: {transcription}")
+            return transcription
+        except Exception as e:
+            logger.error(f"❌ Transcription error: {e}")
+            return None
+
     async def process_email_command(self, command: str, user_id: int = None):
         """
         Process email command through MCP agent.
-        
-        Args:
-            command: Transcribed voice command
-            user_id: Telegram user ID (for context)
         
         Returns:
             Tuple of (response_text, email_list or None)
         """
         try:
-            logger.info(f"🧠 Processing command: {command}")
+            logger.info(f"🧠 Processing: {command}")
+            ctx = self._get_user_context(user_id)
 
-            # Check if user wants to read a specific email by number
-            # Try to find digit number first
+            # ─────────────────────────────────────────
+            # HANDLE "read email number X" locally
+            # ─────────────────────────────────────────
             read_match = re.search(r"read\s+(?:email\s+)?(?:number\s+)?(\d+)", command.lower())
             email_number = None
 
             if read_match:
                 email_number = int(read_match.group(1))
             else:
-                # Try to find word number (one, two, three, etc.)
                 word_match = re.search(r"read\s+(?:email\s+)?(?:number\s+)?(\w+)", command.lower())
                 if word_match:
-                    potential_word = word_match.group(1)
-                    email_number = self._word_to_number(potential_word)
+                    email_number = self._word_to_number(word_match.group(1))
 
-            # If we found a number and user has emails cached
-            if email_number and user_id and user_id in self.user_last_emails:
-                email_index = email_number - 1  # Convert to 0-based index
-                last_emails = self.user_last_emails[user_id]
-
-                if 0 <= email_index < len(last_emails):
-                    # User wants to read email at this index
-                    target_email = last_emails[email_index]
+            if email_number and ctx["last_emails"]:
+                email_index = email_number - 1
+                if 0 <= email_index < len(ctx["last_emails"]):
+                    target_email = ctx["last_emails"][email_index]
                     email_id = target_email["id"]
 
-                    logger.info(f"📖 Reading email {email_index + 1}: {email_id}")
+                    logger.info(f"📖 Reading email {email_number}: {email_id}")
 
-                    # Determine which tool to use based on email ID format
-                    if email_id.isdigit():
-                        read_tool = "read_icloud_email"
-                    else:
-                        read_tool = "read_gmail_email"
-
-                    logger.info(f"Using tool: {read_tool} for email_id: {email_id}")
-
-                    # Call read tool
+                    read_tool = "read_icloud_email" if email_id.isdigit() else "read_gmail_email"
                     result = await self.mcp_client.call_tool(read_tool, email_id=email_id)
 
-                    formatted = self._format_result_for_voice(result, {})
+                    # Store as last read email for context
+                    if isinstance(result, dict) and "error" not in result:
+                        ctx["last_read_email"] = result
+                        ctx["last_read_email"]["id"] = email_id
+                        ctx["last_read_email"]["account"] = "icloud" if email_id.isdigit() else "gmail"
+                        logger.info(f"💾 Stored last read email: {result.get('subject', 'Unknown')}")
+
+                    formatted = self._format_email_content(result)
                     return formatted, None
                 else:
-                    return (
-                        f"Sorry, you only have {len(last_emails)} emails in the list\\.",
-                        None,
-                    )
+                    return f"Sorry, you only have {len(ctx['last_emails'])} emails in the list.", None
 
-            # Normal Groq processing
-            tools_desc = "\n".join(
-                [
-                    f"- {tool.name}: {tool.description}"
-                    for tool in self.mcp_client.available_tools
-                ]
-            )
+            # ─────────────────────────────────────────
+            # HANDLE "draft reply" / "send reply" locally
+            # ─────────────────────────────────────────
+            command_lower = command.lower()
 
-            # System prompt
+            # Check if user wants to draft/send reply to last read email
+            is_draft = any(word in command_lower for word in ['draft', 'reply', 'respond', 'write back'])
+            is_send_reply = any(word in command_lower for word in ['send reply', 'send it', 'yes send'])
+
+            if is_draft and ctx["last_read_email"]:
+                last_email = ctx["last_read_email"]
+                from_addr = last_email.get("from", "")
+                subject = last_email.get("subject", "")
+                body = last_email.get("body", "")
+
+                # Extract reply content from command if provided
+                # e.g. "draft a reply saying I will attend"
+                reply_content_match = re.search(r'(?:saying|that|with|message)\s+(.+)', command_lower)
+                if reply_content_match:
+                    reply_hint = reply_content_match.group(1)
+                else:
+                    reply_hint = ""
+
+                # Parse email address from "From" field
+                email_match = re.search(r'<(.+?)>', from_addr)
+                recipient = email_match.group(1) if email_match else from_addr.strip()
+
+                # Reply subject
+                reply_subject = subject if subject.lower().startswith('re:') else f"Re: {subject}"
+
+                # Generate reply body using Groq
+                reply_body = await self._generate_reply_body(
+                    original_from=from_addr,
+                    original_subject=subject,
+                    original_body=self._strip_html(body),
+                    reply_hint=reply_hint
+                )
+
+                # Store pending draft in context
+                ctx["pending_draft"] = {
+                    "to": recipient,
+                    "subject": reply_subject,
+                    "body": reply_body,
+                    "account": last_email.get("account", "gmail")
+                }
+
+                response = (
+                    f"📧 DRAFT REPLY:\n\n"
+                    f"To: {recipient}\n"
+                    f"Subject: {reply_subject}\n\n"
+                    f"{reply_body}\n\n"
+                    f"Say 'send reply' to send or 'cancel' to cancel."
+                )
+                return response, None
+
+            # Check if user wants to send the pending draft
+            if is_send_reply and ctx.get("pending_draft"):
+                draft = ctx["pending_draft"]
+                account = draft.get("account", "gmail")
+                send_tool = "send_icloud_email" if account == "icloud" else "send_gmail_email"
+
+                result = await self.mcp_client.call_tool(
+                    send_tool,
+                    to=draft["to"],
+                    subject=draft["subject"],
+                    body=draft["body"]
+                )
+
+                # Clear pending draft
+                ctx["pending_draft"] = None
+
+                if isinstance(result, dict) and "error" in result:
+                    return f"Failed to send: {result['error']}", None
+                return f"✅ Reply sent to {draft['to']}!", None
+
+            # Cancel pending draft
+            if 'cancel' in command_lower and ctx.get("pending_draft"):
+                ctx["pending_draft"] = None
+                return "❌ Draft cancelled.", None
+
+            # ─────────────────────────────────────────
+            # NORMAL GROQ PROCESSING
+            # ─────────────────────────────────────────
+            tools_desc = "\n".join([
+                f"- {tool.name}: {tool.description}"
+                for tool in self.mcp_client.available_tools
+            ])
+
+            # Include context in system prompt
+            context_info = ""
+            if ctx["last_read_email"]:
+                context_info = f"""
+CURRENT CONTEXT:
+- Last read email from: {ctx['last_read_email'].get('from', 'Unknown')}
+- Last read email subject: {ctx['last_read_email'].get('subject', 'Unknown')}
+- Account: {ctx['last_read_email'].get('account', 'gmail')}
+"""
+
             system_prompt = f"""You are an email assistant with access to these MCP tools:
 
 {tools_desc}
 
-IMPORTANT INSTRUCTIONS:
-1. When user says "read email X" where X is a number, do NOT call any tools. Just respond with acknowledgment.
-2. For draft replies: Use draft_gmail_reply or draft_icloud_reply tools.
-3. For searches: Use search_gmail with Gmail query syntax.
-4. When user says "check gmail", use query "category:primary" to get main inbox (not promotions).
-5. Gmail categories: category:primary, category:social, category:promotions, category:updates
-6. For iCloud, use list_icloud_emails tool.
-7. Always be helpful and professional.
+{context_info}
 
-When the user asks you to do something, respond with a JSON object:
+IMPORTANT INSTRUCTIONS:
+1. When user says "read email X" where X is a number - respond with action "respond" only (handled by system).
+2. When user says "draft reply" or "send reply" - respond with action "respond" only (handled by system).
+3. When user says "check gmail" - use list_gmail_emails with query "category:primary".
+4. When user says "check icloud" - use list_icloud_emails.
+5. When user wants to send to a NAME (not email address) - use search_gmail to find their email first.
+6. Always respond with valid JSON only.
+
+Respond with:
 {{
     "action": "call_tool" or "respond",
     "tool": "tool_name",
     "params": {{}},
-    "message": "what to tell the user"
+    "message": "message to user"
 }}
 
 Examples:
-User: "read email 1" or "read email number 2"
-{{"action": "respond", "message": "Reading that email for you..."}}
-
 User: "check my gmail"
-{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10, "query": "category:primary"}}, "message": "Fetching your Gmail..."}}
+{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10, "query": "category:primary"}}, "message": "Fetching Gmail..."}}
 
-User: "check my icloud" or "show icloud emails"
-{{"action": "call_tool", "tool": "list_icloud_emails", "params": {{"max_results": 10}}, "message": "Fetching your iCloud emails..."}}
+User: "check my icloud"
+{{"action": "call_tool", "tool": "list_icloud_emails", "params": {{"max_results": 10}}, "message": "Fetching iCloud..."}}
 
-User: "show me promotions"
-{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10, "query": "category:promotions"}}, "message": "Fetching promotions..."}}
+User: "find emails from Nike"
+{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:Nike", "max_results": 5}}, "message": "Searching for Nike emails..."}}
 
-User: "find emails from john"
-{{"action": "call_tool", "tool": "search_gmail", "params": {{"query": "from:john category:primary", "max_results": 10}}, "message": "Searching..."}}
+User: "read email 1" or "draft reply" or "send reply"
+{{"action": "respond", "message": "Handling that for you..."}}
 
-User: "give me my latest 10 emails"
-{{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10, "query": "category:primary"}}, "message": "Fetching your latest emails..."}}
+User: "send email to john@example.com saying hello"
+{{"action": "call_tool", "tool": "send_gmail_email", "params": {{"to": "john@example.com", "subject": "Hello", "body": "hello"}}, "message": "Sending email..."}}
 
 Always respond with valid JSON only."""
 
-            # Call Groq
             response = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
@@ -286,239 +389,171 @@ Always respond with valid JSON only."""
             )
 
             assistant_response = response.choices[0].message.content
-
-            # Parse JSON response
-            import json
+            logger.info(f"🤖 Groq response: {assistant_response}")
 
             try:
                 decision = json.loads(assistant_response)
 
                 if decision.get("action") == "call_tool":
-                    # Call MCP tool
                     logger.info(f"🔧 Calling tool: {decision['tool']}")
 
                     tool_result = await self.mcp_client.call_tool(
                         decision["tool"], **decision.get("params", {})
                     )
 
-                    # Format result for voice response
-                    result_text = self._format_result_for_voice(tool_result, decision)
-
-                    # Return email list if this was a list command
+                    # Store email list in context
                     if isinstance(tool_result, list) and len(tool_result) > 0:
-                        return result_text, tool_result
-                    else:
-                        return result_text, None
+                        ctx["last_emails"] = tool_result
+                        return self._format_email_list(tool_result), tool_result
+
+                    # Handle single email result
+                    if isinstance(tool_result, dict):
+                        if "error" in tool_result:
+                            return f"Error: {tool_result['error']}", None
+                        if tool_result.get("status") == "sent":
+                            return "✅ Email sent successfully!", None
+                        if tool_result.get("status") == "draft_created":
+                            ctx["pending_draft"] = {
+                                "to": tool_result["to"],
+                                "subject": tool_result["subject"],
+                                "body": tool_result["body"],
+                                "account": "gmail"
+                            }
+                            return (
+                                f"📧 DRAFT REPLY:\n\n"
+                                f"To: {tool_result['to']}\n"
+                                f"Subject: {tool_result['subject']}\n\n"
+                                f"{tool_result['body']}\n\n"
+                                f"Say 'send reply' to send or 'cancel' to cancel."
+                            ), None
+
+                        return str(tool_result), None
+
+                    return str(tool_result), None
 
                 else:
-                    # Just respond with message
                     return decision.get("message", assistant_response), None
 
             except json.JSONDecodeError:
                 return assistant_response, None
 
         except Exception as e:
-            logger.error(f"❌ Error processing command: {e}")
+            logger.error(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
-            return "Sorry, I had trouble processing that command\\. Please try again\\.", None
+            return "Sorry, something went wrong. Please try again.", None
 
-    def _escape_markdown(self, text: str) -> str:
+    async def _generate_reply_body(
+        self,
+        original_from: str,
+        original_subject: str,
+        original_body: str,
+        reply_hint: str = ""
+    ) -> str:
         """
-        Escape special characters for Telegram Markdown.
-        """
-        if not text:
-            return text
+        Generate a professional reply body using Groq.
         
-        # Escape special Markdown characters
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
+        Args:
+            original_from: Sender of original email
+            original_subject: Subject of original email
+            original_body: Body of original email
+            reply_hint: User's hint about what to say
         
-        for char in special_chars:
-            text = text.replace(char, '\\' + char)
-        
-        return text
-
-    def _format_result_for_voice(self, tool_result, decision) -> str:
+        Returns:
+            Generated reply body text
         """
-        Format tool results in a voice-friendly way.
-        """
-        # Handle list of emails
-        if isinstance(tool_result, list):
-            if not tool_result:
-                return "You have no emails matching that query\\."
+        prompt = f"""Write a professional email reply.
 
-            # Show up to 10 emails
-            num_to_show = min(len(tool_result), 10)
-            emails_text = f"I found {len(tool_result)} emails\\. Here are the top {num_to_show}:\n\n"
+Original email:
+From: {original_from}
+Subject: {original_subject}
+Body: {original_body[:500]}
 
-            for i, email in enumerate(tool_result[:num_to_show], 1):
-                from_addr = self._escape_markdown(email.get("from", "Unknown"))
-                subject = self._escape_markdown(email.get("subject", "No subject"))
+User wants to reply{f' saying: {reply_hint}' if reply_hint else ''}.
 
-                emails_text += f"{i}\\. From {from_addr}\n"
-                emails_text += f"   Subject: {subject}\n\n"
+Write ONLY the email body text. No subject line, no "To:", just the body.
+Keep it professional, concise, and friendly.
+Sign off with just "Best regards" on a new line."""
 
-            # Add instruction at the end
-            emails_text += "💡 Say 'read email number 1' to read the first one\\."
+        response = self.groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=500,
+        )
 
-            return emails_text
-
-        # Handle single email
-        elif isinstance(tool_result, dict):
-            if "error" in tool_result:
-                error_msg = self._escape_markdown(str(tool_result["error"]))
-                return f"Error: {error_msg}"
-
-            # Email read result
-            if "body" in tool_result:
-                from_addr = self._escape_markdown(tool_result.get('from', 'Unknown'))
-                subject = self._escape_markdown(tool_result.get('subject', 'No subject'))
-                body = self._escape_markdown(tool_result['body'][:500])
-                
-                return (
-                    f"Email from {from_addr}\n"
-                    f"Subject: {subject}\n\n"
-                    f"{body}\\.\\.\\."
-                )
-
-            # Draft result
-            if tool_result.get("status") == "draft_created":
-                to = self._escape_markdown(tool_result['to'])
-                subject = self._escape_markdown(tool_result['subject'])
-                body = self._escape_markdown(tool_result['body'])
-                
-                return (
-                    f"📧 Draft created:\n\n"
-                    f"To: {to}\n"
-                    f"Subject: {subject}\n\n"
-                    f"{body}\n\n"
-                    f"Should I send this? Reply 'yes' or 'no'\\."
-                )
-
-            # Send result
-            if tool_result.get("status") == "sent":
-                return f"✅ Email sent successfully\\!"
-
-            # Generic dict
-            return self._escape_markdown(str(tool_result))
-
-        # Fallback
-        return self._escape_markdown(str(tool_result))
+        return response.choices[0].message.content.strip()
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle voice messages from users.
-        """
+        """Handle voice messages from users."""
         user_name = update.effective_user.first_name
         user_id = update.effective_user.id
-        logger.info(f"📥 Received voice message from {user_name}")
+        logger.info(f"📥 Voice from {user_name}")
 
-        # Send "processing" message
         processing_msg = await update.message.reply_text("🎤 Listening...")
 
         try:
-            # Get voice file
             voice = update.message.voice
             voice_file = await context.bot.get_file(voice.file_id)
 
-            # Create temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
                 temp_path = temp_file.name
 
-            # Download voice
             await voice_file.download_to_drive(temp_path)
-
-            # Update status
             await processing_msg.edit_text("🔄 Transcribing...")
 
-            # Transcribe
             transcribed_text = await self.transcribe_voice(temp_path)
-
-            # Clean up
             os.unlink(temp_path)
 
             if not transcribed_text:
-                await processing_msg.edit_text(
-                    "❌ Couldn't transcribe. Please try again with clearer audio."
-                )
+                await processing_msg.edit_text("❌ Couldn't transcribe. Try again.")
                 return
 
             logger.info(f"📝 Transcribed: {transcribed_text}")
+            await processing_msg.edit_text(f"✅ Heard: {transcribed_text}\n\n⚙️ Processing...")
 
-            # Update status
-            await processing_msg.edit_text(
-                f"✅ Heard: _{transcribed_text}_\n\n⚙️ Processing...",
-                parse_mode="Markdown",
-            )
+            response_text, email_list = await self.process_email_command(transcribed_text, user_id)
 
-            # Process through MCP agent (pass user_id for context)
-            response_text, email_list = await self.process_email_command(
-                transcribed_text, user_id
-            )
-
-            # Store email list if returned
+            # Update email list in context if returned
             if email_list:
-                self.user_last_emails[user_id] = email_list
+                ctx = self._get_user_context(user_id)
+                ctx["last_emails"] = email_list
 
-            # Send response
-            await update.message.reply_text(
-                f"🤖 **Response:**\n\n{response_text}", parse_mode="Markdown"
-            )
+            # Send response as plain text (NO parse_mode to avoid Markdown issues)
+            await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
 
-            # Delete processing message
             await processing_msg.delete()
 
         except Exception as e:
             logger.error(f"❌ Error: {e}")
             import traceback
-
             traceback.print_exc()
-
             await processing_msg.edit_text("❌ Something went wrong. Please try again.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle text messages.
-        """
+        """Handle text messages."""
         await update.message.reply_text(
-            "💬 I see you sent text!\n\n"
+            "💬 Text received!\n\n"
             "I work best with voice messages 🎤\n"
-            "But text support is coming soon!\n\n"
             "Try sending a voice message instead."
         )
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle errors.
-        """
+        """Handle errors."""
         logger.error(f"❌ Error: {context.error}")
-
         if update and update.message:
-            await update.message.reply_text(
-                "❌ Oops! Something went wrong.\nPlease try again or contact support."
-            )
+            await update.message.reply_text("❌ Something went wrong. Please try again.")
 
     async def connect_mcp_async(self):
-        """
-        Connect to MCP server asynchronously.
-        """
+        """Connect to MCP server asynchronously."""
         try:
             logger.info("🔌 Connecting to MCP server...")
-
-            # Create MCP client
             self.mcp_client = MCPEmailClient()
-
-            # Connect using async context manager
             self.mcp_client = await self.mcp_client.__aenter__()
-
-            logger.info(
-                f"✅ MCP connected - {len(self.mcp_client.available_tools)} tools available"
-            )
-
+            logger.info(f"✅ MCP connected - {len(self.mcp_client.available_tools)} tools available")
         except Exception as e:
             logger.error(f"❌ MCP connection failed: {e}")
             import traceback
-
             traceback.print_exc()
             raise
 
@@ -527,26 +562,18 @@ Always respond with valid JSON only."""
         await self.connect_mcp_async()
 
     def run(self):
-        """
-        Start the bot.
-        """
+        """Start the bot."""
         logger.info("🚀 Starting Telegram bot...")
 
-        # Build application with post_init
         app = Application.builder().token(self.token).post_init(self.post_init).build()
 
-        # Add handlers
         app.add_handler(CommandHandler("start", self.start_command))
         app.add_handler(CommandHandler("help", self.help_command))
         app.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
-        app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text)
-        )
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_error_handler(self.error_handler)
 
-        logger.info("✅ Bot configured, starting polling...")
-
-        # Start polling
+        logger.info("✅ Bot ready!")
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
