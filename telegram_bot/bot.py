@@ -146,6 +146,24 @@ Send voice messages to control your email:
             logger.error(f"❌ Transcription error: {e}")
             return None
 
+    def _word_to_number(self, word: str) -> int:
+        """
+        Convert word numbers to integers.
+        
+        Args:
+            word: Number as word (e.g., "one", "two", "three")
+        
+        Returns:
+            Integer or None if not a valid number word
+        """
+        word_to_num = {
+            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+            'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+            'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+            'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10
+        }
+        return word_to_num.get(word.lower())
+
     async def process_email_command(self, command: str, user_id: int = None):
         """
         Process email command through MCP agent.
@@ -161,9 +179,22 @@ Send voice messages to control your email:
             logger.info(f"🧠 Processing command: {command}")
 
             # Check if user wants to read a specific email by number
+            # Try to find digit number first
             read_match = re.search(r"read\s+(?:email\s+)?(?:number\s+)?(\d+)", command.lower())
-            if read_match and user_id and user_id in self.user_last_emails:
-                email_index = int(read_match.group(1)) - 1  # Convert to 0-based index
+            email_number = None
+
+            if read_match:
+                email_number = int(read_match.group(1))
+            else:
+                # Try to find word number (one, two, three, etc.)
+                word_match = re.search(r"read\s+(?:email\s+)?(?:number\s+)?(\w+)", command.lower())
+                if word_match:
+                    potential_word = word_match.group(1)
+                    email_number = self._word_to_number(potential_word)
+
+            # If we found a number and user has emails cached
+            if email_number and user_id and user_id in self.user_last_emails:
+                email_index = email_number - 1  # Convert to 0-based index
                 last_emails = self.user_last_emails[user_id]
 
                 if 0 <= email_index < len(last_emails):
@@ -174,7 +205,6 @@ Send voice messages to control your email:
                     logger.info(f"📖 Reading email {email_index + 1}: {email_id}")
 
                     # Determine which tool to use based on email ID format
-                    # Gmail IDs are hex strings, iCloud IDs are numeric
                     if email_id.isdigit():
                         read_tool = "read_icloud_email"
                     else:
@@ -189,12 +219,11 @@ Send voice messages to control your email:
                     return formatted, None
                 else:
                     return (
-                        f"Sorry, you only have {len(last_emails)} emails in the list.",
+                        f"Sorry, you only have {len(last_emails)} emails in the list\\.",
                         None,
                     )
 
             # Normal Groq processing
-            # Build tool descriptions
             tools_desc = "\n".join(
                 [
                     f"- {tool.name}: {tool.description}"
@@ -208,12 +237,13 @@ Send voice messages to control your email:
 {tools_desc}
 
 IMPORTANT INSTRUCTIONS:
-1. For draft replies: Use draft_gmail_reply or draft_icloud_reply tools.
-2. For searches: Use search_gmail with Gmail query syntax.
-3. When user says "check gmail", use query "category:primary" to get main inbox (not promotions).
-4. Gmail categories: category:primary, category:social, category:promotions, category:updates
-5. For iCloud, use list_icloud_emails tool.
-6. Always be helpful and professional.
+1. When user says "read email X" where X is a number, do NOT call any tools. Just respond with acknowledgment.
+2. For draft replies: Use draft_gmail_reply or draft_icloud_reply tools.
+3. For searches: Use search_gmail with Gmail query syntax.
+4. When user says "check gmail", use query "category:primary" to get main inbox (not promotions).
+5. Gmail categories: category:primary, category:social, category:promotions, category:updates
+6. For iCloud, use list_icloud_emails tool.
+7. Always be helpful and professional.
 
 When the user asks you to do something, respond with a JSON object:
 {{
@@ -224,6 +254,9 @@ When the user asks you to do something, respond with a JSON object:
 }}
 
 Examples:
+User: "read email 1" or "read email number 2"
+{{"action": "respond", "message": "Reading that email for you..."}}
+
 User: "check my gmail"
 {{"action": "call_tool", "tool": "list_gmail_emails", "params": {{"max_results": 10, "query": "category:primary"}}, "message": "Fetching your Gmail..."}}
 
@@ -273,24 +306,22 @@ Always respond with valid JSON only."""
 
                     # Return email list if this was a list command
                     if isinstance(tool_result, list) and len(tool_result) > 0:
-                        return result_text, tool_result  # Return both text and list
+                        return result_text, tool_result
                     else:
-                        return result_text, None  # Just text, no list
+                        return result_text, None
 
                 else:
                     # Just respond with message
                     return decision.get("message", assistant_response), None
 
             except json.JSONDecodeError:
-                # Fallback if not valid JSON
                 return assistant_response, None
 
         except Exception as e:
             logger.error(f"❌ Error processing command: {e}")
             import traceback
-
             traceback.print_exc()
-            return "Sorry, I had trouble processing that command. Please try again.", None
+            return "Sorry, I had trouble processing that command\\. Please try again\\.", None
 
     def _escape_markdown(self, text: str) -> str:
         """
