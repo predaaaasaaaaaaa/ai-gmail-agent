@@ -53,14 +53,6 @@ class EmailBot:
         self.mcp_client = None
 
         # Per-user context memory
-        # {
-        #   user_id: {
-        #     "email_list": [...],
-        #     "read_emails": {"1": {data}, "2": {data}},
-        #     "pending_draft": None or {to, subject, body, account, for_email_num},
-        #     "last_action_email_num": None or "1"
-        #   }
-        # }
         self.user_context = {}
 
         logger.info("✅ Email Bot initialized")
@@ -206,7 +198,6 @@ End with: Best regards"""
                         body=draft["body"]
                     )
 
-                    # ALWAYS clear draft after attempting to send
                     ctx["pending_draft"] = None
 
                     if isinstance(result, dict) and "error" in result:
@@ -234,14 +225,23 @@ End with: Best regards"""
 
             if is_read and ctx["email_list"]:
 
-                # If only 1 email in list, read it automatically
-                if len(ctx["email_list"]) == 1:
+                # Single email auto-read triggers
+                single_read_triggers = [
+                    'read it', 'read this', 'open it', 'open this',
+                    'read the email', 'read that', 'read the mail'
+                ]
+                is_single_trigger = any(t in command_lower for t in single_read_triggers)
+
+                # Auto-read if only 1 email AND user says "read it" OR no number given
+                if len(ctx["email_list"]) == 1 and (
+                    is_single_trigger or not re.search(r'\b(\d+)\b', command_lower)
+                ):
                     target = ctx["email_list"][0]
                     email_id = target["id"]
                     account = "icloud" if email_id.isdigit() else "gmail"
                     read_tool = "read_icloud_email" if account == "icloud" else "read_gmail_email"
 
-                    logger.info(f"📖 Only 1 email - reading automatically: {email_id}")
+                    logger.info(f"📖 Auto-reading single email: {email_id}")
 
                     result = await self.mcp_client.call_tool(read_tool, email_id=email_id)
 
@@ -251,16 +251,17 @@ End with: Best regards"""
                         result["list_number"] = 1
                         ctx["read_emails"]["1"] = result
                         ctx["last_action_email_num"] = "1"
-                        logger.info(f"💾 Auto-stored single email: {result.get('subject')}")
+                        logger.info(f"💾 Auto-stored: {result.get('subject')}")
 
                     return self._format_email_content(result), None
 
+                # Multiple emails - need number
                 email_number = None
+
                 digit_match = re.search(r'\b(\d+)\b', command_lower)
                 if digit_match:
                     email_number = int(digit_match.group(1))
                 else:
-                    # Find word number
                     for word in command_lower.split():
                         num = self._word_to_number(word)
                         if num:
@@ -285,7 +286,7 @@ End with: Best regards"""
                             result["list_number"] = email_number
                             ctx["read_emails"][str(email_number)] = result
                             ctx["last_action_email_num"] = str(email_number)
-                            logger.info(f"💾 Stored email #{email_number}: {result.get('subject')}")
+                            logger.info(f"💾 Stored #{email_number}: {result.get('subject')}")
 
                         return self._format_email_content(result), None
                     else:
@@ -303,10 +304,9 @@ End with: Best regards"""
             is_draft = any(t in command_lower for t in draft_triggers)
 
             if is_draft:
-                # Step 1: Find which email number to draft for
+                # Find which email number to draft for
                 target_email_num = None
 
-                # Look for explicit number: "draft for email 2", "reply to number 3"
                 explicit_match = re.search(
                     r'(?:email|number|mail|#)\s*(\d+)',
                     command_lower
@@ -315,7 +315,6 @@ End with: Best regards"""
                     target_email_num = int(explicit_match.group(1))
                     logger.info(f"📝 Explicit number: #{target_email_num}")
                 else:
-                    # Look for word numbers
                     for word in command_lower.split():
                         num = self._word_to_number(word)
                         if num:
@@ -323,7 +322,7 @@ End with: Best regards"""
                             logger.info(f"📝 Word number: #{target_email_num}")
                             break
 
-                # Step 2: Get email data from context
+                # Get email data from context
                 target_email_data = None
 
                 if target_email_num and str(target_email_num) in ctx["read_emails"]:
@@ -342,7 +341,7 @@ End with: Best regards"""
                         None
                     )
 
-                # Step 3: Extract reply hint
+                # Extract reply hint
                 reply_hint = ""
                 hint_match = re.search(
                     r'(?:saying|that|message|reply with|respond with|tell them|write)\s+(.+)',
@@ -352,7 +351,7 @@ End with: Best regards"""
                     reply_hint = hint_match.group(1)
                     logger.info(f"💬 Reply hint: {reply_hint}")
 
-                # Step 4: Build fresh draft from target email
+                # Build fresh draft
                 from_addr = target_email_data.get("from", "")
                 subject = target_email_data.get("subject", "")
                 body = target_email_data.get("body", "")
@@ -369,7 +368,7 @@ End with: Best regards"""
                     reply_hint=reply_hint
                 )
 
-                # Step 5: OVERWRITE pending_draft completely
+                # OVERWRITE pending_draft completely
                 ctx["pending_draft"] = {
                     "to": recipient,
                     "subject": reply_subject,
@@ -505,7 +504,8 @@ Examples:
             "- 'Show my last 10 emails'\n\n"
             "READING:\n"
             "- 'Read email number 1'\n"
-            "- 'Read email number two'\n\n"
+            "- 'Read email number two'\n"
+            "- 'Read it' (when only 1 result)\n\n"
             "DRAFTING:\n"
             "- 'Draft a reply'\n"
             "- 'Draft a reply for email 2'\n"
@@ -523,9 +523,6 @@ Examples:
             "- Use /clear to reset memory\n"
         )
 
-    # ─────────────────────────────────────────
-    # 2: /status command
-    # ─────────────────────────────────────────
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show current bot context/memory for this user."""
         user_id = update.effective_user.id
@@ -533,7 +530,6 @@ Examples:
 
         msg = "📊 CURRENT STATUS:\n\n"
 
-        # Email list
         if ctx["email_list"]:
             msg += f"📋 Emails loaded: {len(ctx['email_list'])}\n"
             for i, email in enumerate(ctx["email_list"][:5], 1):
@@ -545,9 +541,8 @@ Examples:
 
         msg += "\n"
 
-        # Read emails
         if ctx["read_emails"]:
-            msg += f"📖 Read emails:\n"
+            msg += "📖 Read emails:\n"
             for num, data in ctx["read_emails"].items():
                 msg += f"  #{num}: {data.get('subject', '?')[:30]} ({data.get('account', '?')})\n"
         else:
@@ -555,7 +550,6 @@ Examples:
 
         msg += "\n"
 
-        # Last action
         if ctx["last_action_email_num"]:
             msg += f"👆 Last read: Email #{ctx['last_action_email_num']}\n"
         else:
@@ -563,7 +557,6 @@ Examples:
 
         msg += "\n"
 
-        # Pending draft
         if ctx["pending_draft"]:
             draft = ctx["pending_draft"]
             msg += f"📝 Pending draft:\n"
@@ -576,9 +569,6 @@ Examples:
 
         await update.message.reply_text(msg)
 
-    # ─────────────────────────────────────────
-    # EXTRA: /clear command to reset memory
-    # ─────────────────────────────────────────
     async def clear_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clear all context/memory for this user."""
         user_id = update.effective_user.id
@@ -644,7 +634,6 @@ Examples:
                 transcribed_text, user_id
             )
 
-            # Send as plain text - NO parse_mode to avoid Markdown issues
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
             await processing_msg.delete()
 
@@ -654,21 +643,14 @@ Examples:
             traceback.print_exc()
             await processing_msg.edit_text("❌ Something went wrong. Try again.")
 
-    # ─────────────────────────────────────────
-    # SUGGESTION 1: Text support
-    # ─────────────────────────────────────────
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle text messages.
-        Now supports BOTH text and voice commands!
-        """
+        """Handle text messages - supports both text and voice commands."""
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name
         text = update.message.text
 
         logger.info(f"💬 Text from {user_name}: {text}")
 
-        # Show typing indicator
         processing_msg = await update.message.reply_text("⚙️ Processing...")
 
         try:
@@ -711,16 +693,12 @@ Examples:
 
         app = Application.builder().token(self.token).post_init(self.post_init).build()
 
-        # Commands
         app.add_handler(CommandHandler("start", self.start_command))
         app.add_handler(CommandHandler("help", self.help_command))
         app.add_handler(CommandHandler("status", self.status_command))
         app.add_handler(CommandHandler("clear", self.clear_command))
-
-        # Messages
         app.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
-
         app.add_error_handler(self.error_handler)
 
         logger.info("✅ Bot ready!")
