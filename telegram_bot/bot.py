@@ -1,11 +1,11 @@
 """
-Telegram Voice Bot for AI Email Agent
+Telegram Voice Bot for AI Email Agent - V4 (Text + Voice Responses)
 
 This bot:
 1. Receives voice messages from users
 2. Transcribes them using Groq Whisper
 3. Processes commands through MCP email agent
-4. Responds with text
+4. Responds with TEXT + VOICE (both)
 """
 
 import os
@@ -190,6 +190,55 @@ End with: Best regards"""
             max_tokens=500,
         )
         return response.choices[0].message.content.strip()
+
+    async def transcribe_voice(self, voice_file_path: str) -> str:
+        """Transcribe voice message using Groq Whisper."""
+        try:
+            logger.info(f"🎤 Transcribing: {voice_file_path}")
+            with open(voice_file_path, "rb") as audio_file:
+                transcription = self.groq_client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-large-v3",
+                    language="en",
+                    response_format="text",
+                )
+            logger.info(f"✅ Transcription: {transcription}")
+            return transcription
+        except Exception as e:
+            logger.error(f"❌ Transcription error: {e}")
+            return None
+
+    async def text_to_speech(self, text: str) -> str:
+        """
+        Convert text to speech using Groq TTS (Orpheus).
+        """
+        try:
+            # Limit text length for reasonable voice messages (max ~1000 chars)
+            short_text = text[:1000]
+            
+            logger.info(f"🔊 Generating TTS for {len(short_text)} chars")
+            
+            # Generate speech using Groq Orpheus TTS
+            response = self.groq_client.audio.speech.create(
+                model="canopylabs/orpheus-v1-english",
+                voice="nova",  # Feminine friendly voice
+                input=short_text,
+                response_format="wav"
+            )
+            
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+                f.write(response.content)
+                audio_path = f.name
+            
+            logger.info(f"✅ TTS generated: {audio_path}")
+            return audio_path
+            
+        except Exception as e:
+            logger.error(f"❌ TTS error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     async def process_email_command(self, command: str, user_id: int = None):
         """
@@ -529,12 +578,13 @@ Examples:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "🤖 AI Email Agent - Voice Edition\n\n"
+            "🤖 AI Email Agent - V4 Voice Edition\n\n"
             "HOW TO USE:\n"
             "1. Say or type 'check my Gmail' or 'check my iCloud'\n"
             "2. Say or type 'read email number 1'\n"
             "3. Say or type 'draft a reply'\n"
             "4. Say or type 'send reply'\n\n"
+            "✨ NEW: I now respond with VOICE + TEXT!\n\n"
             "COMMANDS:\n"
             "/help - All voice commands\n"
             "/status - See what I remember\n"
@@ -565,6 +615,7 @@ Examples:
             "- 'Show unread emails'\n\n"
             "TIPS:\n"
             "- Works with VOICE and TEXT!\n"
+            "- I respond with TEXT + VOICE (both)\n"
             "- Use /status to see context\n"
             "- Use /clear to reset memory\n"
         )
@@ -630,7 +681,7 @@ Examples:
         )
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle voice messages from users."""
+        """Handle voice messages from users - V4 with TTS response."""
         user_name = update.effective_user.first_name
         user_id = update.effective_user.id
         logger.info(f"📥 Voice from {user_name}")
@@ -663,7 +714,21 @@ Examples:
                 transcribed_text, user_id
             )
 
+            # Send TEXT response
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
+            
+            # V4: ALWAYS generate and send VOICE response
+            await processing_msg.edit_text("🔊 Generating voice response...")
+            voice_path = await self.text_to_speech(response_text)
+            
+            if voice_path:
+                with open(voice_path, 'rb') as audio:
+                    await update.message.reply_voice(voice=audio)
+                os.unlink(voice_path)  # Clean up temp file
+                logger.info("✅ Voice response sent")
+            else:
+                logger.warning("⚠️ TTS failed, text-only response sent")
+            
             await processing_msg.delete()
 
         except Exception as e:
@@ -672,25 +737,8 @@ Examples:
             traceback.print_exc()
             await processing_msg.edit_text("❌ Something went wrong. Try again.")
 
-    async def transcribe_voice(self, voice_file_path: str) -> str:
-        """Transcribe voice message using Groq Whisper."""
-        try:
-            logger.info(f"🎤 Transcribing: {voice_file_path}")
-            with open(voice_file_path, "rb") as audio_file:
-                transcription = self.groq_client.audio.transcriptions.create(
-                    file=audio_file,
-                    model="whisper-large-v3",
-                    language="en",
-                    response_format="text",
-                )
-            logger.info(f"✅ Transcription: {transcription}")
-            return transcription
-        except Exception as e:
-            logger.error(f"❌ Transcription error: {e}")
-            return None
-
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages - supports both text and voice commands."""
+        """Handle text messages - V4 with TTS response."""
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name
         text = update.message.text
@@ -701,7 +749,22 @@ Examples:
 
         try:
             response_text, email_list = await self.process_email_command(text, user_id)
+            
+            # Send TEXT response
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
+            
+            # V4: ALWAYS generate and send VOICE response
+            await processing_msg.edit_text("🔊 Generating voice response...")
+            voice_path = await self.text_to_speech(response_text)
+            
+            if voice_path:
+                with open(voice_path, 'rb') as audio:
+                    await update.message.reply_voice(voice=audio)
+                os.unlink(voice_path)  # Clean up temp file
+                logger.info("✅ Voice response sent")
+            else:
+                logger.warning("⚠️ TTS failed, text-only response sent")
+            
             await processing_msg.delete()
 
         except Exception as e:
@@ -735,7 +798,7 @@ Examples:
 
     def run(self):
         """Start the bot."""
-        logger.info("🚀 Starting Telegram bot...")
+        logger.info("🚀 Starting Telegram bot V4...")
 
         app = Application.builder().token(self.token).post_init(self.post_init).build()
 
@@ -747,7 +810,7 @@ Examples:
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_error_handler(self.error_handler)
 
-        logger.info("✅ Bot ready!")
+        logger.info("✅ Bot ready with TTS!")
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
