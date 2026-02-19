@@ -1,5 +1,5 @@
 """
-Telegram Voice Bot for AI Email Agent - V4
+Telegram Voice Bot for AI Email Agent - V4 Final
 
 This bot:
 1. Receives voice messages from users
@@ -8,6 +8,7 @@ This bot:
 4. Responds with TEXT (for data) + VOICE (for conversation)
 5. Answers questions naturally (capabilities, security)
 6. Uses varied voice responses (feels human)
+7. Handles off-topic questions gracefully
 """
 
 import os
@@ -289,6 +290,15 @@ End with: Best regards"""
         
         elif command_type == "security":
             return "Your data is completely safe with me. Everything stays on your device!"
+        
+        elif command_type == "off_topic":
+            variations = [
+                "I'm your email assistant! Let me know if you want to check your messages.",
+                "I'm focused on emails! Want me to check your inbox?",
+                "I'm better with emails! Need help with your inbox?",
+                "That's outside my area, but I'm great with emails! Want to check your inbox?"
+            ]
+            return random.choice(variations)
         
         elif command_type == "error":
             variations = [
@@ -686,6 +696,30 @@ Your emails = Your privacy. Always. 🛡️"""
                 ), "draft_reply"
 
             # ─────────────────────────────────────────
+            # OFF-TOPIC DETECTION (Before Groq Processing)
+            # ─────────────────────────────────────────
+            email_keywords = [
+                'email', 'mail', 'gmail', 'icloud', 'inbox', 'message',
+                'draft', 'reply', 'send', 'read', 'check', 'find', 'search',
+                'list', 'show', 'open', 'fetch', 'get', 'unread'
+            ]
+            
+            has_email_keyword = any(word in command_lower for word in email_keywords)
+            
+            # If command is long enough and has NO email keywords, it's probably off-topic
+            if not has_email_keyword and len(command_lower.split()) >= 3:
+                logger.info(f"🔍 Detected off-topic query: {command_lower}")
+                
+                responses = [
+                    "I'm an email assistant, so I focus on managing your inbox! I can check Gmail and iCloud, read emails, draft replies, and search messages. Try saying 'check my Gmail' to get started!",
+                    "That's outside my expertise! I'm here to help with emails - checking Gmail and iCloud, reading messages, drafting replies, and searching your inbox. Want me to check your emails?",
+                    "I'm not sure about that, but I'm great with emails! I can help you check your Gmail or iCloud, read messages, draft professional replies, and find specific emails. Try saying 'check my Gmail'!",
+                    "I specialize in email management! I can check your Gmail and iCloud accounts, read emails, draft AI-powered replies, and search for specific messages. Need help with your inbox?"
+                ]
+                
+                return random.choice(responses), "off_topic"
+
+            # ─────────────────────────────────────────
             # 5. NORMAL GROQ PROCESSING
             # ─────────────────────────────────────────
             tools_desc = "\n".join([
@@ -786,13 +820,13 @@ Examples:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "🤖 AI Email Agent - V4 Phase 2\n\n"
+            "🤖 AI Email Agent - V4 Final\n\n"
             "HOW TO USE:\n"
             "1. Say or type 'check my Gmail' or 'check my iCloud'\n"
             "2. Say or type 'read email number 1'\n"
             "3. Say or type 'draft a reply'\n"
             "4. Say or type 'send reply'\n\n"
-            "✨ NEW: Natural Q&A + Dynamic voice!\n\n"
+            "✨ I understand natural language!\n\n"
             "COMMANDS:\n"
             "/help - All voice commands\n"
             "/status - See what I remember\n"
@@ -804,26 +838,23 @@ Examples:
         await update.message.reply_text(
             "📖 COMMANDS (voice or text):\n\n"
             "LISTING:\n"
-            "- 'Check my Gmail'\n"
-            "- 'Check my iCloud'\n\n"
+            "• 'Check my Gmail'\n"
+            "• 'Check my iCloud'\n\n"
             "READING:\n"
-            "- 'Read email number 1'\n"
-            "- 'Read it' (when only 1 result)\n\n"
+            "• 'Read email number 1'\n"
+            "• 'Read it' (when only 1 result)\n\n"
             "DRAFTING:\n"
-            "- 'Draft a reply'\n"
-            "- 'Draft a reply saying thanks'\n\n"
+            "• 'Draft a reply'\n"
+            "• 'Draft a reply saying thanks'\n\n"
             "SENDING:\n"
-            "- 'Send reply'\n"
-            "- 'Cancel'\n\n"
+            "• 'Send reply'\n"
+            "• 'Cancel'\n\n"
             "SEARCHING:\n"
-            "- 'Find emails from John'\n\n"
+            "• 'Find emails from John'\n\n"
             "QUESTIONS:\n"
-            "- 'What can you do?'\n"
-            "- 'Is this secure?'\n\n"
-            "TIPS:\n"
-            "- Works with VOICE and TEXT!\n"
-            "- Dynamic responses (never repeats)\n"
-            "- Use /status to see context"
+            "• 'What can you do?'\n"
+            "• 'Is this secure?'\n\n"
+            "💡 I focus on emails - if you ask about something else, I'll gently redirect you back to email tasks!"
         )
 
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -887,7 +918,7 @@ Examples:
         )
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle voice messages from users - V4 Phase 2."""
+        """Handle voice messages from users - V4 Final."""
         user_name = update.effective_user.first_name
         user_id = update.effective_user.id
         logger.info(f"📥 Voice from {user_name}")
@@ -948,7 +979,7 @@ Examples:
             await processing_msg.edit_text("❌ Something went wrong. Try again.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages - V4 Phase 2."""
+        """Handle text messages - V4 Final."""
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name
         text = update.message.text
@@ -1012,7 +1043,7 @@ Examples:
 
     def run(self):
         """Start the bot."""
-        logger.info("🚀 Starting Telegram bot V4 Phase 2...")
+        logger.info("🚀 Starting Telegram bot V4 Final...")
 
         app = Application.builder().token(self.token).post_init(self.post_init).build()
 
@@ -1024,7 +1055,7 @@ Examples:
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_error_handler(self.error_handler)
 
-        logger.info("✅ Bot ready with Natural Q&A + Dynamic Voice!")
+        logger.info("✅ Bot ready with off-topic detection!")
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
