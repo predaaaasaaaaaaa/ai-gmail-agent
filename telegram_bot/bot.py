@@ -1,11 +1,11 @@
 """
-Telegram Voice Bot for AI Email Agent - V4 (Text + Voice Responses)
+Telegram Voice Bot for AI Email Agent - V4 Phase 1.5 (Smart Conversational Voice)
 
 This bot:
 1. Receives voice messages from users
 2. Transcribes them using Groq Whisper
 3. Processes commands through MCP email agent
-4. Responds with TEXT + VOICE (both)
+4. Responds with TEXT (for data) + VOICE (for conversation)
 """
 
 import os
@@ -191,6 +191,56 @@ End with: Best regards"""
         )
         return response.choices[0].message.content.strip()
 
+    def _get_voice_message(self, command_type: str, ctx: dict) -> str:
+        """
+        Generate smart conversational voice message based on command type.
+        
+        Args:
+            command_type: Type of command executed (list_emails, read_email, etc.)
+            ctx: User context dictionary
+            
+        Returns:
+            Short conversational message for TTS (under 200 chars)
+        """
+        if command_type == "list_emails":
+            count = len(ctx["email_list"])
+            if count == 0:
+                return "You have no new emails."
+            elif count == 1:
+                return "You have 1 new email. Would you like me to read it?"
+            else:
+                return f"Here are your latest {count} emails. Which one would you like me to read?"
+        
+        elif command_type == "read_email":
+            email_num = ctx["last_action_email_num"]
+            return f"Here's email number {email_num}. Would you like me to draft a reply, or read another email?"
+        
+        elif command_type == "draft_reply":
+            email_num = ctx["pending_draft"]["for_email_num"]
+            return f"I've drafted a reply for email number {email_num}. Would you like me to send it?"
+        
+        elif command_type == "send_reply":
+            return "Done! Reply sent. Anything else I can help you with?"
+        
+        elif command_type == "cancel_draft":
+            return "Draft cancelled. What else can I help you with?"
+        
+        elif command_type == "search_emails":
+            count = len(ctx["email_list"])
+            if count == 0:
+                return "I couldn't find any emails matching that. Try a different search?"
+            elif count == 1:
+                return "I found 1 email. Say 'read it' to open it."
+            else:
+                return f"I found {count} emails. Which one would you like to read?"
+        
+        elif command_type == "error":
+            return "Sorry, something went wrong. Could you try that again?"
+        
+        else:
+            # No voice for unknown commands
+            return ""
+
     async def transcribe_voice(self, voice_file_path: str) -> str:
         """Transcribe voice message using Groq Whisper."""
         try:
@@ -211,14 +261,22 @@ End with: Best regards"""
     async def text_to_speech(self, text: str) -> str:
         """
         Convert text to speech using Groq TTS (Orpheus).
+        Returns path to audio file.
+        
+        Args:
+            text: Text to convert to speech (keep under 200 chars for fast uploads)
+            
+        Returns:
+            Path to generated audio file, or None if failed
         """
         try:
-            # Limit text length for reasonable voice messages (max ~1000 chars)
-            short_text = text[:1000]
+            # Limit to 200 chars for conversational messages (fast & token-efficient)
+            short_text = text[:200]
             
             logger.info(f"🔊 Generating TTS for {len(short_text)} chars")
             
             # Generate speech using Groq Orpheus TTS
+            # Available voices: autumn, diana, hannah (feminine) | austin, daniel, troy (masculine)
             response = self.groq_client.audio.speech.create(
                 model="canopylabs/orpheus-v1-english",
                 voice="diana",  # Feminine friendly voice
@@ -228,7 +286,7 @@ End with: Best regards"""
             
             # Save to temp file
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                f.write(response.read())
+                f.write(response.read())  # Use .read() for BinaryAPIResponse
                 audio_path = f.name
             
             logger.info(f"✅ TTS generated: {audio_path}")
@@ -243,7 +301,7 @@ End with: Best regards"""
     async def process_email_command(self, command: str, user_id: int = None):
         """
         Process email command through MCP agent.
-        Returns: Tuple of (response_text, email_list or None)
+        Returns: Tuple of (response_text, command_type)
         """
         try:
             logger.info(f"🧠 Processing: {command}")
@@ -281,11 +339,11 @@ End with: Best regards"""
                     ctx["pending_draft"] = None
 
                     if isinstance(result, dict) and "error" in result:
-                        return f"Failed to send: {result['error']}", None
+                        return f"Failed to send: {result['error']}", "error"
 
-                    return f"✅ Reply sent to {draft['to']}!", None
+                    return f"✅ Reply sent to {draft['to']}!", "send_reply"
                 else:
-                    return "No pending draft to send. Say 'draft a reply' first.", None
+                    return "No pending draft to send. Say 'draft a reply' first.", "error"
 
             # ─────────────────────────────────────────
             # 2. CANCEL DRAFT
@@ -293,7 +351,7 @@ End with: Best regards"""
             if 'cancel' in command_lower:
                 if ctx["pending_draft"]:
                     ctx["pending_draft"] = None
-                    return "❌ Draft cancelled.", None
+                    return "❌ Draft cancelled.", "cancel_draft"
 
             # ─────────────────────────────────────────
             # 3. READ EMAIL NUMBER X
@@ -333,7 +391,7 @@ End with: Best regards"""
                         ctx["last_action_email_num"] = "1"
                         logger.info(f"💾 Auto-stored: {result.get('subject')}")
 
-                    return self._format_email_content(result), None
+                    return self._format_email_content(result), "read_email"
 
                 # Multiple emails - need number
                 email_number = None
@@ -377,11 +435,11 @@ End with: Best regards"""
                             ctx["last_action_email_num"] = str(email_number)
                             logger.info(f"💾 Stored #{email_number}: {result.get('subject')}")
 
-                        return self._format_email_content(result), None
+                        return self._format_email_content(result), "read_email"
                     else:
-                        return f"Only {len(ctx['email_list'])} emails in list.", None
+                        return f"Only {len(ctx['email_list'])} emails in list.", "error"
                 else:
-                    return "Please specify which email number to read.", None
+                    return "Please specify which email number to read.", "error"
 
             # ─────────────────────────────────────────
             # 4. DRAFT REPLY
@@ -433,7 +491,7 @@ End with: Best regards"""
                     return (
                         "Please read an email first.\n"
                         "Say 'read email number 1' then 'draft a reply'.",
-                        None
+                        "error"
                     )
 
                 # Extract reply hint
@@ -481,7 +539,7 @@ End with: Best regards"""
                     f"{reply_body}\n\n"
                     f"---\n"
                     f"Say 'send reply' to send or 'cancel' to cancel."
-                ), None
+                ), "draft_reply"
 
             # ─────────────────────────────────────────
             # 5. NORMAL GROQ PROCESSING
@@ -555,36 +613,43 @@ Examples:
                             ctx["last_action_email_num"] = None
                             ctx["pending_draft"] = None
                             logger.info(f"💾 New list: {len(tool_result)} emails")
-                            return self._format_email_list(tool_result), tool_result
-                        return "No emails found.", None
+                            
+                            # Determine command type based on tool
+                            if "search" in decision['tool']:
+                                command_type = "search_emails"
+                            else:
+                                command_type = "list_emails"
+                            
+                            return self._format_email_list(tool_result), command_type
+                        return "No emails found.", "search_emails"
 
                     if isinstance(tool_result, dict):
                         if "error" in tool_result:
-                            return f"Error: {tool_result['error']}", None
+                            return f"Error: {tool_result['error']}", "error"
                         if tool_result.get("status") == "sent":
-                            return "✅ Email sent!", None
-                        return str(tool_result), None
+                            return "✅ Email sent!", "send_reply"
+                        return str(tool_result), "unknown"
 
-                return decision.get("message", "Done!"), None
+                return decision.get("message", "Done!"), "unknown"
 
             except json.JSONDecodeError:
-                return assistant_response, None
+                return assistant_response, "unknown"
 
         except Exception as e:
             logger.error(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
-            return "Sorry, something went wrong. Please try again.", None
+            return "Sorry, something went wrong. Please try again.", "error"
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "🤖 AI Email Agent - V4 Voice Edition\n\n"
+            "🤖 AI Email Agent - V4 Phase 1.5\n\n"
             "HOW TO USE:\n"
             "1. Say or type 'check my Gmail' or 'check my iCloud'\n"
             "2. Say or type 'read email number 1'\n"
             "3. Say or type 'draft a reply'\n"
             "4. Say or type 'send reply'\n\n"
-            "✨ NEW: I now respond with VOICE + TEXT!\n\n"
+            "✨ NEW: Smart conversational voice responses!\n\n"
             "COMMANDS:\n"
             "/help - All voice commands\n"
             "/status - See what I remember\n"
@@ -615,7 +680,7 @@ Examples:
             "- 'Show unread emails'\n\n"
             "TIPS:\n"
             "- Works with VOICE and TEXT!\n"
-            "- I respond with TEXT + VOICE (both)\n"
+            "- I send TEXT for data + VOICE for conversation\n"
             "- Use /status to see context\n"
             "- Use /clear to reset memory\n"
         )
@@ -681,7 +746,7 @@ Examples:
         )
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle voice messages from users - V4 with TTS response."""
+        """Handle voice messages from users - V4 Phase 1.5 with Smart Voice."""
         user_name = update.effective_user.first_name
         user_id = update.effective_user.id
         logger.info(f"📥 Voice from {user_name}")
@@ -710,24 +775,31 @@ Examples:
                 f"✅ Heard: {transcribed_text}\n\n⚙️ Processing..."
             )
 
-            response_text, email_list = await self.process_email_command(
+            # Get response TEXT and command TYPE
+            response_text, command_type = await self.process_email_command(
                 transcribed_text, user_id
             )
 
-            # Send TEXT response
+            # Send TEXT response (data)
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
             
-            # V4: ALWAYS generate and send VOICE response
-            await processing_msg.edit_text("🔊 Generating voice response...")
-            voice_path = await self.text_to_speech(response_text)
+            # V4: Generate SMART VOICE message based on command type
+            ctx = self._get_ctx(user_id)
+            voice_message = self._get_voice_message(command_type, ctx)
             
-            if voice_path:
-                with open(voice_path, 'rb') as audio:
-                    await update.message.reply_voice(voice=audio)
-                os.unlink(voice_path)  # Clean up temp file
-                logger.info("✅ Voice response sent")
+            if voice_message:
+                await processing_msg.edit_text("🔊 Generating voice response...")
+                voice_path = await self.text_to_speech(voice_message)
+                
+                if voice_path:
+                    with open(voice_path, 'rb') as audio:
+                        await update.message.reply_voice(voice=audio)
+                    os.unlink(voice_path)
+                    logger.info(f"✅ Voice sent: '{voice_message}'")
+                else:
+                    logger.warning("⚠️ TTS failed")
             else:
-                logger.warning("⚠️ TTS failed, text-only response sent")
+                logger.info("ℹ️ No voice message for this command type")
             
             await processing_msg.delete()
 
@@ -738,7 +810,7 @@ Examples:
             await processing_msg.edit_text("❌ Something went wrong. Try again.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages - V4 with TTS response."""
+        """Handle text messages - V4 Phase 1.5 with Smart Voice."""
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name
         text = update.message.text
@@ -748,22 +820,29 @@ Examples:
         processing_msg = await update.message.reply_text("⚙️ Processing...")
 
         try:
-            response_text, email_list = await self.process_email_command(text, user_id)
+            # Get response TEXT and command TYPE
+            response_text, command_type = await self.process_email_command(text, user_id)
             
-            # Send TEXT response
+            # Send TEXT response (data)
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
             
-            # V4: ALWAYS generate and send VOICE response
-            await processing_msg.edit_text("🔊 Generating voice response...")
-            voice_path = await self.text_to_speech(response_text)
+            # V4: Generate SMART VOICE message based on command type
+            ctx = self._get_ctx(user_id)
+            voice_message = self._get_voice_message(command_type, ctx)
             
-            if voice_path:
-                with open(voice_path, 'rb') as audio:
-                    await update.message.reply_voice(voice=audio)
-                os.unlink(voice_path)  # Clean up temp file
-                logger.info("✅ Voice response sent")
+            if voice_message:
+                await processing_msg.edit_text("🔊 Generating voice response...")
+                voice_path = await self.text_to_speech(voice_message)
+                
+                if voice_path:
+                    with open(voice_path, 'rb') as audio:
+                        await update.message.reply_voice(voice=audio)
+                    os.unlink(voice_path)
+                    logger.info(f"✅ Voice sent: '{voice_message}'")
+                else:
+                    logger.warning("⚠️ TTS failed")
             else:
-                logger.warning("⚠️ TTS failed, text-only response sent")
+                logger.info("ℹ️ No voice message for this command type")
             
             await processing_msg.delete()
 
@@ -798,7 +877,7 @@ Examples:
 
     def run(self):
         """Start the bot."""
-        logger.info("🚀 Starting Telegram bot V4...")
+        logger.info("🚀 Starting Telegram bot V4 Phase 1.5...")
 
         app = Application.builder().token(self.token).post_init(self.post_init).build()
 
@@ -810,7 +889,7 @@ Examples:
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_error_handler(self.error_handler)
 
-        logger.info("✅ Bot ready with TTS!")
+        logger.info("✅ Bot ready with Smart Conversational Voice!")
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
