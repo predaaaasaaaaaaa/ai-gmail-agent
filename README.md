@@ -1,33 +1,60 @@
-# 🤖 AI Email Agent with MCP - V3 (Telegram Voice Bot)
+# 🤖 AI Email Agent with MCP - V4 (Voice Conversational Bot)
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-Enabled-green.svg)](https://modelcontextprotocol.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://hub.docker.com/r/samymetref/ai-email-agent)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot-blue.svg)](https://telegram.org/)
+[![Groq](https://img.shields.io/badge/Groq-Powered-orange.svg)](https://groq.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An intelligent AI email assistant powered by Groq's LLaMA 3.3 70B and Model Context Protocol (MCP). Manage Gmail and iCloud emails via **voice messages** on Telegram or natural language text commands.
+An intelligent AI email assistant powered by Groq's LLaMA 3.3 70B and Model Context Protocol (MCP). Manage Gmail and iCloud emails via **natural voice conversation** on Telegram.
 
 ---
 
-## 🎉 What's New in V3
+## 🎉 What's New in V4 Final
 
-**🎤 Telegram Voice Bot** - Your personal email assistant you can talk to!
+**🗣️ Fully Conversational AI** - Bot doesn't just transcribe, it *talks* back!
 
-- **Voice Control** - Send voice messages in Telegram to manage emails
-- **Text Commands** - Type commands if you prefer
-- **Smart Context Memory** - Bot remembers all read emails and drafts
-- **AI Reply Generation** - Professional email replies with custom hints
-- **Whisper Transcription** - Groq Whisper handles voice-to-text
-- **Multi-Account** - Seamless Gmail + iCloud switching
-- **Auto-Read Single Results** - Just say "read it" when there's 1 email
-- **Session Management** - `/status` to see what bot remembers, `/clear` to reset
+### New Features
+- **🔊 Text-to-Speech (TTS)** - Bot responds with voice using Groq Orpheus
+- **🎯 Smart Voice System** - Only speaks conversation, not data
+- **💬 Natural Q&A** - Ask "What can you do?" or "Is this secure?"
+- **🎲 Dynamic Variations** - Never repeats the same response twice
+- **🧠 Off-Topic Detection** - Gracefully handles non-email questions
+- **👂 Human-Like Interaction** - Feels like talking to a real assistant
+
+### V4 Interaction Example
+```
+🎤 You: "Check my Gmail"
+📝 Bot: [Lists 10 emails in text]
+🔊 Bot: "Here are your latest 10 emails. Which one would you like me to read?"
+
+🎤 You: "Read email number 2"
+📝 Bot: [Shows full email content]
+🔊 Bot: "Here's email number 2. Would you like me to draft a reply?"
+
+🎤 You: "Draft a reply"
+📝 Bot: [Shows AI-generated draft]
+🔊 Bot: "I've drafted a reply for email 2. Would you like me to send it?"
+
+🎤 You: "Send it"
+📝 Bot: "✅ Reply sent!"
+🔊 Bot: "Done! Reply sent. Anything else I can help you with?"
+```
 
 ---
 
 ## ✨ All Features
 
-### Core Capabilities
+### V4 Voice Intelligence
+- ✅ **Groq Whisper (STT)** - Understands your voice commands
+- ✅ **Groq Orpheus TTS** - Responds with natural voice (diana voice)
+- ✅ **Smart Voice Triggers** - Only speaks when needed (conversation, not data)
+- ✅ **Dynamic Variations** - 3-5 response variations per action (never repeats)
+- ✅ **Natural Q&A** - Answers "What can you do?" and "Is this secure?"
+- ✅ **Off-Topic Handling** - Redirects gracefully to email tasks
+
+### Core Email Capabilities
 - ✅ **Read Emails** - Gmail (primary inbox) + iCloud
 - ✅ **Send Emails** - Compose via natural language
 - ✅ **Advanced Search** - Find by sender, subject, date, keywords
@@ -37,7 +64,7 @@ An intelligent AI email assistant powered by Groq's LLaMA 3.3 70B and Model Cont
 - ✅ **MCP Architecture** - Modular, reusable tools
 - ✅ **Dockerized** - One-command deployment
 
-### V3 Telegram Bot Commands
+### V4 Telegram Bot Commands
 
 **Setup Commands:**
 ```
@@ -59,7 +86,8 @@ An intelligent AI email assistant powered by Groq's LLaMA 3.3 70B and Model Cont
 "Send reply" - Send pending draft
 "Cancel" - Cancel pending draft
 "Find emails from Nike" - Search by sender
-"Search emails about meetings" - Search by keyword
+"What can you do?" - See capabilities
+"Is this secure?" - Security explanation
 ```
 
 ---
@@ -67,7 +95,7 @@ An intelligent AI email assistant powered by Groq's LLaMA 3.3 70B and Model Cont
 ## 🏗️ Architecture
 ```
 ┌─────────────────┐
-│  Telegram User  │
+│  Telegram User  │ ◄── Voice Input
 └────────┬────────┘
          │ Voice Message
          ▼
@@ -98,7 +126,17 @@ An intelligent AI email assistant powered by Groq's LLaMA 3.3 70B and Model Cont
          ▼
 ┌─────────────────────┐
 │  Email Handlers     │ ◄── Gmail API + iCloud IMAP/SMTP
+└─────────┬───────────┘
+         │
+         ▼
+┌─────────────────────┐
+│  Groq Orpheus TTS   │ ◄── Text-to-Speech (Voice Response)
 └─────────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Telegram User  │ ◄── Voice + Text Response
+└─────────────────┘
 ```
 
 ---
@@ -107,7 +145,7 @@ An intelligent AI email assistant powered by Groq's LLaMA 3.3 70B and Model Cont
 ```
 ai-gmail-agent/
 ├── telegram_bot/
-│   └── bot.py              # V3 Telegram bot (voice + text)
+│   └── bot.py              # V4 Telegram bot (voice conversation)
 ├── agent/
 │   ├── client.py           # V2 CLI agent
 │   └── mcp_client.py       # MCP client wrapper
@@ -123,7 +161,7 @@ ai-gmail-agent/
 
 ---
 
-## 🚀 Quick Start - V3 Telegram Bot
+## 🚀 Quick Start - V4 Telegram Bot
 
 ### Prerequisites
 
@@ -182,6 +220,11 @@ You'll need:
 3. API Keys → Create new key
 4. Copy it
 
+**Note:** One Groq API key gives you access to:
+- Whisper (Speech-to-Text)
+- LLaMA 3.3 70B (AI reasoning)
+- Orpheus TTS (Text-to-Speech)
+
 ---
 
 ### Step 4: iCloud Setup (Optional)
@@ -203,7 +246,7 @@ Create `.env` in project root:
 # Telegram
 TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 
-# Groq API
+# Groq API (one key for everything!)
 GROQ_API_KEY=gsk_your_groq_api_key_here
 
 # iCloud (optional)
@@ -218,7 +261,7 @@ ICLOUD_PASSWORD=xxxx-xxxx-xxxx-xxxx
 **Option 1: Python (Local)**
 ```bash
 # Clone repo
-git clone https://github.com/samymetref/ai-gmail-agent
+git clone https://github.com/predaaaasaaaaaaa/ai-gmail-agent
 cd ai-gmail-agent
 
 # Create virtual environment
@@ -242,7 +285,7 @@ python telegram_bot/bot.py
 **Option 2: Docker (Recommended)**
 ```bash
 # Pull latest image
-docker pull samymetref/ai-email-agent:v3
+docker pull samymetref/ai-email-agent:v4
 
 # Run bot
 docker run -d \
@@ -250,94 +293,130 @@ docker run -d \
   -v $(pwd)/credentials.json:/app/credentials.json:ro \
   -v $(pwd)/token.pickle:/app/token.pickle \
   -v $(pwd)/.env:/app/.env:ro \
-  samymetref/ai-email-agent:v3 \
+  samymetref/ai-email-agent:v4 \
   python telegram_bot/bot.py
 ```
 
 ---
 
-### Step 7: Use Your Bot!
+### Step 7: Experience Voice Conversation!
 
 1. Open Telegram
 2. Search for your bot (`@my_email_assistant_bot`)
 3. Send `/start`
-4. **Try voice commands:**
+4. **Have a voice conversation:**
    - 🎤 "Check my Gmail"
+   - 🔊 Bot speaks: "Here are your latest 10 emails..."
    - 🎤 "Read email number 1"
-   - 🎤 "Draft a reply"
-   - 🎤 "Send reply"
+   - 🔊 Bot speaks: "Here's email number 1. Would you like me to draft a reply?"
+   - 🎤 "Yes, draft a reply"
+   - 🔊 Bot speaks: "I've drafted a reply. Would you like me to send it?"
 
-**Or type the same commands!**
+**Or type the same commands - works both ways!**
 
 ---
 
 ## 💬 Usage Examples
 
-### Basic Flow
+### V4 Conversational Flow
 ```
-🎤 Voice: "Check my Gmail"
-🤖 Bot: Found 10 emails. Showing top 10:
-        1. From: john@company.com
-           Subject: Meeting tomorrow
-        
-        2. From: sarah@startup.io
-           Subject: Project update
-        ...
+🎤 You (Voice): "Check my Gmail"
 
-🎤 Voice: "Read email number 1"
-🤖 Bot: From: john@company.com
-        Subject: Meeting tomorrow
-        
-        Hi, can we meet tomorrow at 3pm?
-        Let me know!
+📝 Bot (Text): 
+Found 10 emails. Showing top 10:
+1. From: john@company.com
+   Subject: Meeting tomorrow
+2. From: sarah@startup.io
+   Subject: Project update
+...
 
-🎤 Voice: "Draft a reply saying I'll be there"
-🤖 Bot: 📧 DRAFT REPLY (email #1):
-        
-        To: john@company.com
-        Subject: Re: Meeting tomorrow
-        
-        Hi John,
-        
-        Thank you for reaching out. I'll be there 
-        tomorrow at 3pm. Looking forward to it!
-        
-        Best regards
-        ---
-        Say 'send reply' to send or 'cancel' to cancel.
+🔊 Bot (Voice): "Here are your latest 10 emails. Which one would you like me to read?"
 
-🎤 Voice: "Send reply"
-🤖 Bot: ✅ Reply sent to john@company.com!
+───────────────────────────────────
+
+🎤 You (Voice): "Read email number 1"
+
+📝 Bot (Text):
+From: john@company.com
+Subject: Meeting tomorrow
+
+Hi, can we meet tomorrow at 3pm?
+Let me know!
+
+🔊 Bot (Voice): "Here's email number 1. Would you like me to draft a reply, or read another email?"
+
+───────────────────────────────────
+
+🎤 You (Voice): "Draft a reply saying I'll be there"
+
+📝 Bot (Text):
+📧 DRAFT REPLY (email #1):
+
+To: john@company.com
+Subject: Re: Meeting tomorrow
+
+Hi John,
+
+Thank you for reaching out. I'll be there 
+tomorrow at 3pm. Looking forward to it!
+
+Best regards
+---
+Say 'send reply' to send or 'cancel' to cancel.
+
+🔊 Bot (Voice): "I've drafted a reply for email number 1. Would you like me to send it?"
+
+───────────────────────────────────
+
+🎤 You (Voice): "Send it"
+
+📝 Bot (Text): ✅ Reply sent to john@company.com!
+
+🔊 Bot (Voice): "Done! Reply sent. Anything else I can help you with?"
+```
+
+### Natural Q&A
+```
+🎤 You: "What can you do?"
+
+📝 Bot: [Full capabilities list with emojis]
+
+🔊 Bot: "I've listed everything I can do for you. Feel free to ask me anything!"
+
+───────────────────────────────────
+
+🎤 You: "Is this secure?"
+
+📝 Bot: [Complete security explanation]
+
+🔊 Bot: "Your data is completely safe with me. Everything stays on your device!"
+```
+
+### Off-Topic Handling
+```
+🎤 You: "What's the weather today?"
+
+📝 Bot: "I'm an email assistant, so I focus on managing your inbox! 
+I can check Gmail and iCloud, read emails, draft replies, and 
+search messages. Try saying 'check my Gmail'!"
+
+🔊 Bot: "I'm focused on emails! Want me to check your inbox?"
 ```
 
 ### Advanced Search
 ```
 🎤 "Find emails from Nike"
-🤖 Found 1 email:
-   1. From: Nike <updates@nike.com>
-      Subject: New collection
-   
-   Say 'read it' to read it.
 
-🎤 "Read it"
-🤖 [Reads email automatically]
+📝 Found 2 emails:
+1. From: Nike <updates@nike.com>
+   Subject: New collection
+2. From: Nike <promo@nike.com>
+   Subject: 20% off sale
 
-🎤 "Search emails about meetings"
-🤖 Found 5 emails...
-```
+🔊 "I found 2 emails. Which one would you like to read?"
 
-### Context Management
-```
-💬 Type: /status
-🤖 Bot: 📊 CURRENT STATUS:
-        
-        📋 Emails loaded: 10
-        📖 Read emails:
-           #1: Meeting tomorrow (gmail)
-           #2: Project update (gmail)
-        
-        👆 Last read: Email #2
-        📝 Pending draft: None
+🎤 "Read email 1"
+🔊 "Here's email number 1. Would you like me to draft a reply?"
 ```
 
 ---
@@ -348,6 +427,7 @@ docker run -d \
 |-----------|-----------|
 | **Bot Framework** | python-telegram-bot 20.0+ |
 | **Speech-to-Text** | Groq Whisper Large V3 |
+| **Text-to-Speech** | Groq Orpheus (diana voice) |
 | **AI Reasoning** | Groq LLaMA 3.3 70B |
 | **Protocol** | Model Context Protocol (MCP) |
 | **Gmail** | Gmail API (OAuth 2.0) |
@@ -399,7 +479,7 @@ docker logs -f email-bot
 # Check logs
 python telegram_bot/bot.py
 
-# Look for: "✅ Bot ready!"
+# Look for: "✅ Bot ready with off-topic detection!"
 # If not, check .env file has TELEGRAM_BOT_TOKEN
 ```
 
@@ -411,6 +491,16 @@ python telegram_bot/bot.py
 - Check Groq API key in `.env`
 - Verify API quota: [console.groq.com](https://console.groq.com)
 - Try shorter voice message (< 10 seconds)
+
+### TTS not working
+
+**Problem:** Bot sends text but no voice response
+
+**Solution:**
+- Check Groq API daily limits (3600 tokens/day for TTS)
+- Voice messages are under 200 chars each
+- Wait 24 hours if rate limited
+- Check logs for "✅ Voice sent"
 
 ### Gmail OAuth error
 
@@ -481,12 +571,21 @@ The bot uses these email tools via MCP:
 ✅ Draft approval required (no auto-send)  
 ✅ Voice processed via Groq (encrypted HTTPS)  
 ✅ No data stored on Telegram servers  
+✅ **Open source** - audit the code yourself!  
 
 ### What's Never Committed
 
 🚫 `credentials.json` - Gmail OAuth  
 🚫 `token.pickle` - Gmail access token  
 🚫 `.env` - All API keys  
+
+### What Groq Processes
+
+✅ Voice transcription (Whisper) - No email content  
+✅ AI reasoning (LLaMA) - Command interpretation only  
+✅ Voice generation (Orpheus) - Conversational responses only  
+
+**Groq NEVER sees your email content!**
 
 ### Best Practices
 
@@ -499,7 +598,26 @@ The bot uses these email tools via MCP:
 
 ## 📊 Version History
 
-### V3 (Current) - Telegram Voice Bot
+### V4 (Current) - Voice Conversational AI
+**Released:** February 2026
+
+**New:**
+- 🔊 Text-to-Speech voice responses (Groq Orpheus)
+- 🎯 Smart voice system (only speaks conversation)
+- 💬 Natural Q&A ("What can you do?", "Is this secure?")
+- 🎲 Dynamic response variations (never repeats)
+- 🧠 Off-topic detection & graceful redirect
+- 👂 Human-like conversation flow
+
+**Features:**
+- Voice input AND output (full conversation)
+- Context-aware TTS messages
+- Token-optimized (200 chars max per voice)
+- 3-5 response variations per action
+- Capabilities & security explanations
+- Friendly off-topic handling
+
+### V3 - Telegram Voice Bot
 **Released:** February 2026
 
 **New:**
@@ -508,17 +626,6 @@ The bot uses these email tools via MCP:
 - 🤖 AI-powered reply generation
 - 📱 Mobile-friendly (Telegram app)
 - 🔄 Whisper transcription normalization
-- 📊 `/status` command for transparency
-- 🗑️ `/clear` command to reset
-
-**Features:**
-- Voice message support via Groq Whisper
-- Smart context tracking (remembers all read emails)
-- Multi-account drafting (Gmail/iCloud auto-detection)
-- Single-result auto-read ("read it" when 1 email)
-- Word number support ("two" = 2)
-- HTML email cleaning
-- Session persistence
 
 ### V2 - MCP Email Agent
 **Released:** January 2026
@@ -527,8 +634,6 @@ The bot uses these email tools via MCP:
 - Model Context Protocol architecture
 - 10 email tools (list, read, send, search, draft)
 - Gmail advanced search
-- Draft reply workflow
-- CLI interface
 
 ### V1 - Basic Email Bot
 **Released:** January 2026
@@ -541,12 +646,13 @@ The bot uses these email tools via MCP:
 
 ## 🎯 Roadmap
 
-### V4 (Planned)
-- 🔊 **TTS Voice Responses** - Bot replies with voice
+### V5 (Planned)
 - 📎 **Attachment Support** - Send/receive files
 - 🗓️ **Calendar Integration** - Schedule from emails
 - 🔔 **Push Notifications** - Real-time email alerts
 - 🌐 **Multi-language** - Support more languages
+- 🎨 **Voice Style Selection** - Choose TTS voice
+- 👥 **Multi-user** - Family/team bot access
 - 📊 **Analytics Dashboard** - Email insights
 
 ---
@@ -559,7 +665,7 @@ MIT License - Free to use, modify, and distribute
 
 ## 🙏 Acknowledgments
 
-- **Groq** - Fast LLaMA inference + Whisper API
+- **Groq** - Fast LLaMA inference, Whisper API & Orpheus TTS
 - **Telegram** - Bot platform
 - **Google** - Gmail API
 - **Apple** - iCloud IMAP/SMTP
@@ -569,8 +675,8 @@ MIT License - Free to use, modify, and distribute
 
 ## 📧 Links
 
-- **Docker Hub:** (https://hub.docker.com/repository/registry-1.docker.io/samymetref/ai-email-agent/general)
-- **GitHub:** [https://github.com/predaaaasaaaaaaa](https://github.com/predaaaasaaaaaaa/ai-gmail-agent)
+- **Docker Hub:** [samymetref/ai-email-agent](https://hub.docker.com/r/samymetref/ai-email-agent)
+- **GitHub:** [predaaaasaaaaaaa/ai-gmail-agent](https://github.com/predaaaasaaaaaaa/ai-gmail-agent)
 - **Groq Console:** [console.groq.com](https://console.groq.com)
 - **MCP Docs:** [modelcontextprotocol.io](https://modelcontextprotocol.io)
 
@@ -600,10 +706,16 @@ A: No. Everything is processed in real-time and stored locally on your machine.
 A: No. Your bot is private. Only you can access it (unless you share the link).
 
 **Q: What if I run out of Groq credits?**  
-A: Groq free tier is generous. If you hit limits, wait 24h or upgrade to paid.
+A: Groq free tier: 3600 TTS tokens/day. Each voice message ~50-200 tokens. Wait 24h if you hit limits.
+
+**Q: Can I choose a different voice?**  
+A: Yes! Edit `bot.py` line 363: `voice="diana"` → Options: diana, hannah, autumn (feminine) or troy, austin, daniel (masculine)
 
 **Q: Can I host this on a server?**  
 A: Yes! Use Docker on any VPS (AWS, DigitalOcean, etc.). Keep `.env` secure.
+
+**Q: Why does the bot speak some responses but not others?**  
+A: By design! Bot sends TEXT for data (email lists, content) and VOICE for conversation (questions, confirmations). This saves tokens and is faster.
 
 ---
 
@@ -615,4 +727,4 @@ A: Yes! Use Docker on any VPS (AWS, DigitalOcean, etc.). Keep `.env` secure.
 
 ---
 
-**Ready to manage your emails with your voice? Get started in 10 minutes! 🚀**
+**Ready to have voice conversations with your email assistant? Get started in 10 minutes! 🚀**
