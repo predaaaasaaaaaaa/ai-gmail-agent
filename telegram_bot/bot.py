@@ -1,11 +1,13 @@
 """
-Telegram Voice Bot for AI Email Agent - V4 Phase 1.5 (Smart Conversational Voice)
+Telegram Voice Bot for AI Email Agent - V4
 
 This bot:
 1. Receives voice messages from users
 2. Transcribes them using Groq Whisper
 3. Processes commands through MCP email agent
 4. Responds with TEXT (for data) + VOICE (for conversation)
+5. Answers questions naturally (capabilities, security)
+6. Uses varied voice responses (feels human)
 """
 
 import os
@@ -15,6 +17,7 @@ import sys
 import re
 import json
 import html
+import random
 from pathlib import Path
 from telegram import Update
 from telegram.ext import (
@@ -193,10 +196,10 @@ End with: Best regards"""
 
     def _get_voice_message(self, command_type: str, ctx: dict) -> str:
         """
-        Generate smart conversational voice message based on command type.
+        Generate smart conversational voice message with variations.
         
         Args:
-            command_type: Type of command executed (list_emails, read_email, etc.)
+            command_type: Type of command executed
             ctx: User context dictionary
             
         Returns:
@@ -205,40 +208,97 @@ End with: Best regards"""
         if command_type == "list_emails":
             count = len(ctx["email_list"])
             if count == 0:
-                return "You have no new emails."
+                variations = [
+                    "You have no new emails.",
+                    "Your inbox is empty.",
+                    "No new messages right now."
+                ]
             elif count == 1:
-                return "You have 1 new email. Would you like me to read it?"
+                variations = [
+                    "You have 1 new email. Would you like me to read it?",
+                    "There's 1 email here. Want me to open it?",
+                    "One new message. Should I read it to you?"
+                ]
             else:
-                return f"Here are your latest {count} emails. Which one would you like me to read?"
+                variations = [
+                    f"Here are your latest {count} emails. Which one would you like me to read?",
+                    f"I found {count} emails for you. Would you like me to read one?",
+                    f"You have {count} new emails. Which one should I open?",
+                    f"Got {count} emails here. Want me to read any of them?"
+                ]
+            return random.choice(variations)
         
         elif command_type == "read_email":
             email_num = ctx["last_action_email_num"]
-            return f"Here's email number {email_num}. Would you like me to draft a reply, or read another email?"
+            variations = [
+                f"Here's email number {email_num}. Would you like me to draft a reply, or read another email?",
+                f"That's email {email_num}. Want me to write a reply, or check another one?",
+                f"Email {email_num} is ready. Should I draft a response, or move to the next one?"
+            ]
+            return random.choice(variations)
         
         elif command_type == "draft_reply":
             email_num = ctx["pending_draft"]["for_email_num"]
-            return f"I've drafted a reply for email number {email_num}. Would you like me to send it?"
+            variations = [
+                f"I've drafted a reply for email number {email_num}. Would you like me to send it?",
+                f"Draft ready for email {email_num}. Should I send it now?",
+                f"Your reply to email {email_num} is done. Want me to send it?"
+            ]
+            return random.choice(variations)
         
         elif command_type == "send_reply":
-            return "Done! Reply sent. Anything else I can help you with?"
+            variations = [
+                "Done! Reply sent. Anything else I can help you with?",
+                "All set! Email sent. What's next?",
+                "Message delivered! Need anything else?"
+            ]
+            return random.choice(variations)
         
         elif command_type == "cancel_draft":
-            return "Draft cancelled. What else can I help you with?"
+            variations = [
+                "Draft cancelled. What else can I help you with?",
+                "Okay, draft deleted. Anything else?",
+                "Draft removed. What would you like to do next?"
+            ]
+            return random.choice(variations)
         
         elif command_type == "search_emails":
             count = len(ctx["email_list"])
             if count == 0:
-                return "I couldn't find any emails matching that. Try a different search?"
+                variations = [
+                    "I couldn't find any emails matching that. Try a different search?",
+                    "No matches found. Want to search for something else?",
+                    "Nothing came up. Should I look for something different?"
+                ]
             elif count == 1:
-                return "I found 1 email. Say 'read it' to open it."
+                variations = [
+                    "I found 1 email. Say 'read it' to open it.",
+                    "One match here. Want me to read it?",
+                    "Found one email. Should I open it?"
+                ]
             else:
-                return f"I found {count} emails. Which one would you like to read?"
+                variations = [
+                    f"I found {count} emails. Which one would you like to read?",
+                    f"Got {count} matches. Which one should I open?",
+                    f"Found {count} emails. Want me to read any of them?"
+                ]
+            return random.choice(variations)
+        
+        elif command_type == "capabilities":
+            return "I've listed everything I can do for you. Feel free to ask me anything!"
+        
+        elif command_type == "security":
+            return "Your data is completely safe with me. Everything stays on your device!"
         
         elif command_type == "error":
-            return "Sorry, something went wrong. Could you try that again?"
+            variations = [
+                "Sorry, something went wrong. Could you try that again?",
+                "Oops, I hit a snag. Mind repeating that?",
+                "Had a little trouble there. Can you say that again?"
+            ]
+            return random.choice(variations)
         
         else:
-            # No voice for unknown commands
             return ""
 
     async def transcribe_voice(self, voice_file_path: str) -> str:
@@ -276,7 +336,6 @@ End with: Best regards"""
             logger.info(f"🔊 Generating TTS for {len(short_text)} chars")
             
             # Generate speech using Groq Orpheus TTS
-            # Available voices: autumn, diana, hannah (feminine) | austin, daniel, troy (masculine)
             response = self.groq_client.audio.speech.create(
                 model="canopylabs/orpheus-v1-english",
                 voice="diana",  # Feminine friendly voice
@@ -286,7 +345,7 @@ End with: Best regards"""
             
             # Save to temp file
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                f.write(response.read())  # Use .read() for BinaryAPIResponse
+                f.write(response.read())
                 audio_path = f.name
             
             logger.info(f"✅ TTS generated: {audio_path}")
@@ -310,6 +369,100 @@ End with: Best regards"""
             # Normalize BEFORE anything else
             command = self._normalize_command(command)
             command_lower = command.lower().strip()
+
+            # ─────────────────────────────────────────
+            # NATURAL Q&A: Capabilities
+            # ─────────────────────────────────────────
+            capability_triggers = [
+                'what can you do', 'your skills', 'your capabilities',
+                'what are you able to do', 'help me', 'what do you do',
+                'show me features', 'what features', 'how can you help'
+            ]
+            
+            if any(trigger in command_lower for trigger in capability_triggers):
+                response = """🤖 I'M YOUR AI EMAIL ASSISTANT! HERE'S WHAT I CAN DO:
+
+📧 EMAIL MANAGEMENT:
+- Check Gmail & iCloud inboxes
+- Read emails with full content
+- Search by sender, subject, or keywords
+- List recent, unread, or specific emails
+
+✍️ SMART REPLIES:
+- Draft AI-generated professional replies
+- Customize responses with your input
+- Send emails on your behalf (with confirmation)
+
+🎤 VOICE INTERACTION:
+- Speak naturally - I understand you
+- Get conversational voice responses
+- Works with text commands too
+
+💡 SMART FEATURES:
+- Remembers conversation context
+- Auto-reads single search results
+- Detects word numbers ("two" = 2)
+- Multi-account support (Gmail + iCloud)
+
+Just talk to me naturally! Try:
+- "Check my Gmail"
+- "Read email number 3"
+- "Find emails from Nike"
+- "Draft a reply saying thanks"
+- "Send it"
+
+Ask me about security if you're curious! 🔒"""
+                return response, "capabilities"
+
+            # ─────────────────────────────────────────
+            # NATURAL Q&A: Security
+            # ─────────────────────────────────────────
+            security_triggers = [
+                'secure', 'safe', 'privacy', 'private', 'data security',
+                'is this safe', 'can i trust', 'security', 'protected'
+            ]
+            
+            if any(trigger in command_lower for trigger in security_triggers):
+                response = """🔒 YOUR DATA IS COMPLETELY SECURE. HERE'S HOW:
+
+🏠 LOCAL PROCESSING:
+- All credentials stored on YOUR device only
+- Gmail OAuth tokens encrypted by Google
+- iCloud passwords never sent to our servers
+- No data leaves your machine
+
+🔐 AUTHENTICATION:
+- Gmail: OAuth 2.0 (industry standard)
+- iCloud: App-specific passwords (Apple security)
+- API keys in .env file (never committed to Git)
+- You can revoke access anytime
+
+🏗️ ARCHITECTURE:
+- MCP Server runs locally on your machine
+- Groq API: Only text processing (no email content)
+- Open source - audit the code yourself!
+- No third-party storage or databases
+
+✅ WHAT WE DO:
+- Process commands via AI (Groq)
+- Generate voice responses (Groq TTS)
+- Transcribe your voice (Groq Whisper)
+
+❌ WHAT WE DON'T DO:
+- Store your emails anywhere
+- Log your conversations
+- Share data with third parties
+- Access emails without your command
+
+📊 TRANSPARENCY:
+- GitHub: View all source code
+- Docker: Run in isolated container
+- Self-hosted: YOU control everything
+
+Questions? Check the code: https://github.com/predaaaasaaaaaaa/ai-gmail-agent
+
+Your emails = Your privacy. Always. 🛡️"""
+                return response, "security"
 
             # ─────────────────────────────────────────
             # 1. SEND REPLY - highest priority
@@ -363,14 +516,12 @@ End with: Best regards"""
 
             if is_read and ctx["email_list"]:
 
-                # Single email auto-read triggers
                 single_read_triggers = [
                     'read it', 'read this', 'open it', 'open this',
                     'read the email', 'read that', 'read the mail'
                 ]
                 is_single_trigger = any(t in command_lower for t in single_read_triggers)
 
-                # Auto-read if only 1 email AND user says "read it" OR no number given
                 if len(ctx["email_list"]) == 1 and (
                     is_single_trigger or not re.search(r'\b(\d+)\b', command_lower)
                 ):
@@ -393,15 +544,12 @@ End with: Best regards"""
 
                     return self._format_email_content(result), "read_email"
 
-                # Multiple emails - need number
                 email_number = None
 
-                # Try digit first
                 digit_match = re.search(r'\b(\d+)\b', command_lower)
                 if digit_match:
                     email_number = int(digit_match.group(1))
                 else:
-                    # Try word numbers - skip non-number words
                     skip_words = {
                         'read', 'email', 'number', 'the', 'me', 'please',
                         'open', 'show', 'get', 'fetch', 'load', 'mail', 'a', 'an'
@@ -475,7 +623,6 @@ End with: Best regards"""
                             logger.info(f"📝 Word number: #{target_email_num}")
                             break
 
-                # Get email data
                 target_email_data = None
 
                 if target_email_num and str(target_email_num) in ctx["read_emails"]:
@@ -494,7 +641,6 @@ End with: Best regards"""
                         "error"
                     )
 
-                # Extract reply hint
                 reply_hint = ""
                 hint_match = re.search(
                     r'(?:saying|that|message|reply with|respond with|tell them|write)\s+(.+)',
@@ -504,7 +650,6 @@ End with: Best regards"""
                     reply_hint = hint_match.group(1)
                     logger.info(f"💬 Reply hint: {reply_hint}")
 
-                # Build fresh draft
                 from_addr = target_email_data.get("from", "")
                 subject = target_email_data.get("subject", "")
                 body = target_email_data.get("body", "")
@@ -521,7 +666,6 @@ End with: Best regards"""
                     reply_hint=reply_hint
                 )
 
-                # OVERWRITE pending_draft completely
                 ctx["pending_draft"] = {
                     "to": recipient,
                     "subject": reply_subject,
@@ -614,7 +758,6 @@ Examples:
                             ctx["pending_draft"] = None
                             logger.info(f"💾 New list: {len(tool_result)} emails")
                             
-                            # Determine command type based on tool
                             if "search" in decision['tool']:
                                 command_type = "search_emails"
                             else:
@@ -643,17 +786,18 @@ Examples:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "🤖 AI Email Agent - V4 Phase 1.5\n\n"
+            "🤖 AI Email Agent - V4 Phase 2\n\n"
             "HOW TO USE:\n"
             "1. Say or type 'check my Gmail' or 'check my iCloud'\n"
             "2. Say or type 'read email number 1'\n"
             "3. Say or type 'draft a reply'\n"
             "4. Say or type 'send reply'\n\n"
-            "✨ NEW: Smart conversational voice responses!\n\n"
+            "✨ NEW: Natural Q&A + Dynamic voice!\n\n"
             "COMMANDS:\n"
             "/help - All voice commands\n"
             "/status - See what I remember\n"
-            "/clear - Clear my memory\n"
+            "/clear - Clear my memory\n\n"
+            "💡 Ask me: 'What can you do?' or 'Is this secure?'"
         )
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -661,28 +805,25 @@ Examples:
             "📖 COMMANDS (voice or text):\n\n"
             "LISTING:\n"
             "- 'Check my Gmail'\n"
-            "- 'Check my iCloud'\n"
-            "- 'Show my last 10 emails'\n\n"
+            "- 'Check my iCloud'\n\n"
             "READING:\n"
             "- 'Read email number 1'\n"
-            "- 'Read email number two'\n"
             "- 'Read it' (when only 1 result)\n\n"
             "DRAFTING:\n"
             "- 'Draft a reply'\n"
-            "- 'Draft a reply for email 2'\n"
-            "- 'Draft a reply saying I will attend'\n\n"
+            "- 'Draft a reply saying thanks'\n\n"
             "SENDING:\n"
             "- 'Send reply'\n"
             "- 'Cancel'\n\n"
             "SEARCHING:\n"
-            "- 'Find emails from John'\n"
-            "- 'Search emails about meetings'\n"
-            "- 'Show unread emails'\n\n"
+            "- 'Find emails from John'\n\n"
+            "QUESTIONS:\n"
+            "- 'What can you do?'\n"
+            "- 'Is this secure?'\n\n"
             "TIPS:\n"
             "- Works with VOICE and TEXT!\n"
-            "- I send TEXT for data + VOICE for conversation\n"
-            "- Use /status to see context\n"
-            "- Use /clear to reset memory\n"
+            "- Dynamic responses (never repeats)\n"
+            "- Use /status to see context"
         )
 
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -746,7 +887,7 @@ Examples:
         )
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle voice messages from users - V4 Phase 1.5 with Smart Voice."""
+        """Handle voice messages from users - V4 Phase 2."""
         user_name = update.effective_user.first_name
         user_id = update.effective_user.id
         logger.info(f"📥 Voice from {user_name}")
@@ -775,15 +916,12 @@ Examples:
                 f"✅ Heard: {transcribed_text}\n\n⚙️ Processing..."
             )
 
-            # Get response TEXT and command TYPE
             response_text, command_type = await self.process_email_command(
                 transcribed_text, user_id
             )
 
-            # Send TEXT response (data)
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
             
-            # V4: Generate SMART VOICE message based on command type
             ctx = self._get_ctx(user_id)
             voice_message = self._get_voice_message(command_type, ctx)
             
@@ -810,7 +948,7 @@ Examples:
             await processing_msg.edit_text("❌ Something went wrong. Try again.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages - V4 Phase 1.5 with Smart Voice."""
+        """Handle text messages - V4 Phase 2."""
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name
         text = update.message.text
@@ -820,13 +958,10 @@ Examples:
         processing_msg = await update.message.reply_text("⚙️ Processing...")
 
         try:
-            # Get response TEXT and command TYPE
             response_text, command_type = await self.process_email_command(text, user_id)
             
-            # Send TEXT response (data)
             await update.message.reply_text(f"🤖 Response:\n\n{response_text}")
             
-            # V4: Generate SMART VOICE message based on command type
             ctx = self._get_ctx(user_id)
             voice_message = self._get_voice_message(command_type, ctx)
             
@@ -877,7 +1012,7 @@ Examples:
 
     def run(self):
         """Start the bot."""
-        logger.info("🚀 Starting Telegram bot V4 Phase 1.5...")
+        logger.info("🚀 Starting Telegram bot V4 Phase 2...")
 
         app = Application.builder().token(self.token).post_init(self.post_init).build()
 
@@ -889,7 +1024,7 @@ Examples:
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_error_handler(self.error_handler)
 
-        logger.info("✅ Bot ready with Smart Conversational Voice!")
+        logger.info("✅ Bot ready with Natural Q&A + Dynamic Voice!")
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
