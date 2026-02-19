@@ -221,7 +221,7 @@ End with: Best regards"""
             # Generate speech using Groq Orpheus TTS
             response = self.groq_client.audio.speech.create(
                 model="canopylabs/orpheus-v1-english",
-                voice="nova",  # Feminine friendly voice
+                voice="diana",  # Feminine friendly voice
                 input=short_text,
                 response_format="wav"
             )
