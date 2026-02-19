@@ -228,7 +228,7 @@ End with: Best regards"""
             
             # Save to temp file
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                f.write(response.content)
+                f.write(response.read())
                 audio_path = f.name
             
             logger.info(f"✅ TTS generated: {audio_path}")
